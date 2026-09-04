@@ -1,47 +1,111 @@
-export type Axis = 'x' | 'z';
+import { OSMMapData } from './osm-types';
+import { Vec2 } from './types';
 
-export interface RoadSegment {
-  axis: Axis;
-  offset: number;
+export interface PolylineRoad {
+  name: string;
+  width: number;
+  points: Vec2[];
 }
 
-export interface LaneDash {
-  axis: Axis;
-  x: number;
-  z: number;
+export interface TrackBounds {
+  minX: number;
+  minZ: number;
+  maxX: number;
+  maxZ: number;
+}
+
+export interface Spawn {
+  position: Vec2;
+  heading: number;
 }
 
 export interface TrackData {
-  size: number;
-  roadWidth: number;
-  dashLength: number;
-  roads: RoadSegment[];
-  laneDashes: LaneDash[];
+  roads: PolylineRoad[];
+  bounds: TrackBounds;
+  spawn: Spawn;
 }
 
-const SIZE = 400;
-const ROAD_WIDTH = 16;
-const DASH_LENGTH = 16;
-const GRID_SPACING = 40;
+const WIDTH_BUCKETS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
+const MAJOR_ROAD_MIN_WIDTH = 12;
 
-export function createTrack(): TrackData {
-  const roads: RoadSegment[] = [
-    { axis: 'x', offset: 0 },
-    { axis: 'z', offset: 0 },
-  ];
+function quantizeWidth(raw: number): number {
+  let best = WIDTH_BUCKETS[0];
+  let bestDist = Math.abs(raw - best);
+  for (let i = 1; i < WIDTH_BUCKETS.length; i++) {
+    const dist = Math.abs(raw - WIDTH_BUCKETS[i]);
+    if (dist < bestDist) {
+      best = WIDTH_BUCKETS[i];
+      bestDist = dist;
+    }
+  }
+  return best;
+}
 
-  const half = SIZE / 2;
-  const laneDashes: LaneDash[] = [];
+const ORIGIN_SPAWN: Spawn = { position: { x: 0, z: 0 }, heading: 0 };
 
-  for (const road of roads) {
-    for (let distance = -half; distance <= half; distance += GRID_SPACING) {
-      laneDashes.push(
-        road.axis === 'x'
-          ? { axis: 'x', x: distance, z: road.offset }
-          : { axis: 'z', x: road.offset, z: distance },
-      );
+function selectSpawn(roads: { width: number; points: Vec2[] }[]): Spawn {
+  if (roads.length === 0) {
+    return ORIGIN_SPAWN;
+  }
+
+  const major = roads.filter((r) => r.width >= MAJOR_ROAD_MIN_WIDTH);
+  const candidates = major.length > 0 ? major : roads;
+
+  let best: Spawn | null = null;
+  let bestDistSq = Infinity;
+
+  for (const road of candidates) {
+    for (let i = 0; i < road.points.length - 1; i++) {
+      const p = road.points[i];
+      const d = p.x * p.x + p.z * p.z;
+      if (d < bestDistSq) {
+        bestDistSq = d;
+        const dx = road.points[i + 1].x - p.x;
+        const dz = road.points[i + 1].z - p.z;
+        best = { position: { x: p.x, z: p.z }, heading: Math.atan2(-dx, -dz) };
+      }
     }
   }
 
-  return { size: SIZE, roadWidth: ROAD_WIDTH, dashLength: DASH_LENGTH, roads, laneDashes };
+  return best ?? ORIGIN_SPAWN;
+}
+
+export function createTrack(osmData: OSMMapData): TrackData {
+  const roads: PolylineRoad[] = [];
+
+  let minX = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxZ = -Infinity;
+
+  for (const road of osmData.roads) {
+    if (road.points.length < 2) {
+      continue;
+    }
+
+    const points: Vec2[] = road.points.map((p) => ({ x: p.x, z: p.z }));
+    const width = quantizeWidth(road.width);
+
+    roads.push({ name: road.name ?? '', width, points });
+
+    for (const p of points) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.z < minZ) minZ = p.z;
+      if (p.z > maxZ) maxZ = p.z;
+    }
+  }
+
+  const padding = 50;
+
+  return {
+    roads,
+    bounds: {
+      minX: minX - padding,
+      minZ: minZ - padding,
+      maxX: maxX + padding,
+      maxZ: maxZ + padding,
+    },
+    spawn: selectSpawn(roads),
+  };
 }
