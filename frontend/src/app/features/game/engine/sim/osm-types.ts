@@ -15,6 +15,8 @@ export interface OSMRoad {
   name: string;
   lanes: number;
   width: number;
+  oneway: 0 | 1 | -1;
+  access: string;
   points: Vec2[];
 }
 

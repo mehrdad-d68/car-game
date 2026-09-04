@@ -1,0 +1,12 @@
+<p-select
+  [options]="streets()"
+  [ngModel]="selected()"
+  (ngModelChange)="selected.set($event)"
+  optionLabel="label"
+  placeholder="Search street..."
+  [filter]="true"
+  filterBy="label"
+  [showClear]="true"
+  styleClass="street-select"
+  (onChange)="onSelect($event.value)"
+/>

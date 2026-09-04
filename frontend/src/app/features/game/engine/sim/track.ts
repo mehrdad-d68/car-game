@@ -4,6 +4,8 @@ import { Vec2 } from './types';
 export interface PolylineRoad {
   name: string;
   width: number;
+  oneway: 0 | 1 | -1;
+  access: string;
   points: Vec2[];
 }
 
@@ -86,7 +88,7 @@ export function createTrack(osmData: OSMMapData): TrackData {
     const points: Vec2[] = road.points.map((p) => ({ x: p.x, z: p.z }));
     const width = quantizeWidth(road.width);
 
-    roads.push({ name: road.name ?? '', width, points });
+    roads.push({ name: road.name ?? '', width, oneway: road.oneway, access: road.access, points });
 
     for (const p of points) {
       if (p.x < minX) minX = p.x;

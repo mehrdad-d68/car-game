@@ -1,1 +1,4 @@
 <div #gameContainer class="viewport"></div>
+<div class="search-overlay">
+  <app-street-search (streetSelected)="onStreetSelected($event)" />
+</div>

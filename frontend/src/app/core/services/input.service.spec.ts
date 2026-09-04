@@ -39,4 +39,39 @@ describe('InputService', () => {
 
     expect(event.defaultPrevented).toBe(false);
   });
+
+  it('does not swallow or track keys when focus is inside an editable control', () => {
+    const input = document.createElement('input');
+    const event = new KeyboardEvent('keydown', { code: 'ArrowDown', cancelable: true });
+    Object.defineProperty(event, 'target', { value: input });
+
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(service.isDown('ArrowDown')).toBe(false);
+  });
+
+  it('does not swallow or track keys when an interactive widget has focus', () => {
+    const trigger = document.createElement('div');
+    trigger.setAttribute('role', 'combobox');
+    const event = new KeyboardEvent('keydown', { code: 'ArrowDown', cancelable: true });
+    Object.defineProperty(event, 'target', { value: trigger });
+
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(service.isDown('ArrowDown')).toBe(false);
+  });
+
+  it('releases a held key when focus moves into the search box before keyup', () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+    expect(service.isDown('KeyW')).toBe(true);
+
+    const input = document.createElement('input');
+    const up = new KeyboardEvent('keyup', { code: 'KeyW' });
+    Object.defineProperty(up, 'target', { value: input });
+    window.dispatchEvent(up);
+
+    expect(service.isDown('KeyW')).toBe(false);
+  });
 });

@@ -157,6 +157,26 @@ determinism. `loop.ts` owns this; don't bypass it.
   - Backend: `cd backend && npm run build`
   - Frontend: `cd frontend && npm run build` and `npx ng test --watch=false`
 
+## Code reviews
+
+**`code-review.md`** (repository root) is the only place review findings live. It
+contains its own Protocol section — read it before reviewing or fixing.
+
+**"do a code review"** — review the changes, then **overwrite `code-review.md`**
+with the findings, removing the previous contents (keep its Protocol section).
+Group by severity: **P1 correctness**, **P2 logic**, **P3 consistency**. Every
+finding says what is wrong, **why**, and where as a `path:line` reference, with
+measured evidence where possible. Always include a **What's done well** section.
+Reviewing never includes fixing — those are separate requests.
+
+**"fix the review"** — read `code-review.md` and implement it, highest severity
+first, following the conventions above (placement, no comments, tests where this
+file mandates them). **Skip any finding that does not hold up**: one that is
+wrong, no longer applies, or whose fix costs more than the defect. Skipping is
+expected and legitimate. At the end of the run, report explicitly **what was
+fixed and what was skipped, with a reason for each skip** — never leave a skipped
+finding unmentioned.
+
 ## Stack notes
 
 - Backend: NestJS 11. DB is planned (TypeORM or Prisma + Postgres), but not yet added.

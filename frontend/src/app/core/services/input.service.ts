@@ -11,7 +11,28 @@ export class InputService implements OnDestroy {
     window.addEventListener('keyup', this.onKeyUp);
   }
 
+  private isWidgetTarget(event: KeyboardEvent): boolean {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return false;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      target.isContentEditable
+    ) {
+      return true;
+    }
+    const role = target.getAttribute('role');
+    return (
+      role === 'combobox' ||
+      role === 'listbox' ||
+      role === 'option' ||
+      role === 'button'
+    );
+  }
+
   private onKeyDown = (event: KeyboardEvent) => {
+    if (this.isWidgetTarget(event)) return;
     this.codes.add(event.code);
     if (SWALLOWED_CODES.has(event.code)) {
       event.preventDefault();

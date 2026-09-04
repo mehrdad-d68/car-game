@@ -17,6 +17,8 @@ const SAMPLE_DATA: OSMMapData = {
       name: 'Road A',
       lanes: 2,
       width: 12,
+      oneway: 1,
+      access: 'yes',
       points: [
         { x: 0, z: 0 },
         { x: 100, z: 0 },
@@ -29,6 +31,8 @@ const SAMPLE_DATA: OSMMapData = {
       name: 'Road B',
       lanes: 1,
       width: 6,
+      oneway: 0,
+      access: 'yes',
       points: [
         { x: 50, z: -100 },
         { x: 50, z: 100 },
@@ -40,6 +44,8 @@ const SAMPLE_DATA: OSMMapData = {
       name: 'Dead end',
       lanes: 1,
       width: 4,
+      oneway: 1,
+      access: 'private',
       points: [{ x: 0, z: 0 }],
     },
   ],
@@ -73,6 +79,13 @@ describe('createTrack', () => {
     expect(roadA!.points).toHaveLength(3);
     expect(roadA!.points[0]).toEqual({ x: 0, z: 0 });
     expect(roadA!.points[2]).toEqual({ x: 200, z: 50 });
+  });
+
+  it('preserves the access field through createTrack', () => {
+    const track = createTrack(SAMPLE_DATA);
+    const residential = track.roads.find((r) => r.name === 'Road B');
+    expect(residential).toBeDefined();
+    expect(residential!.access).toBe('yes');
   });
 
   it('spawns on a major road, not the narrow residential road', () => {
