@@ -73,4 +73,13 @@ describe('stepVehicle', () => {
 
     expect(drive()).toEqual(drive());
   });
+
+  it('caps reverse speed at 8 units/s', () => {
+    let state = createCarState();
+    for (let i = 0; i < 600; i++) {
+      state = stepVehicle(state, { ...IDLE, throttle: -1 }, DT);
+    }
+    expect(state.speed).toBeCloseTo(-8, 3);
+    expect(state.speed).toBeGreaterThanOrEqual(-8);
+  });
 });

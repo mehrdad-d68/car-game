@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CarState } from '../sim/types';
+import { ROAD_HEIGHT } from './constants';
 
 const WHEEL_POSITIONS: [number, number, number][] = [
   [-0.95, 0.32, 1.2],
@@ -69,7 +70,7 @@ export class CarView {
   sync(previous: CarState, current: CarState, alpha: number): void {
     this.group.position.set(
       previous.position.x + (current.position.x - previous.position.x) * alpha,
-      0,
+      ROAD_HEIGHT,
       previous.position.z + (current.position.z - previous.position.z) * alpha,
     );
     this.group.rotation.y = previous.heading + (current.heading - previous.heading) * alpha;

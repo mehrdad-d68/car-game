@@ -11,8 +11,8 @@ describe('CameraRig', () => {
       rig.follow(AT_ORIGIN, 1 / 60);
     }
 
-    expect(rig.camera.position.z).toBeCloseTo(6.5, 2);
-    expect(rig.camera.position.y).toBeCloseTo(4.5, 2);
+    expect(rig.camera.position.z).toBeCloseTo(12, 2);
+    expect(rig.camera.position.y).toBeCloseTo(8, 2);
     expect(rig.camera.position.x).toBeCloseTo(0, 2);
   });
 
@@ -24,6 +24,6 @@ describe('CameraRig', () => {
       rig.follow(facingBackwards, 1 / 60);
     }
 
-    expect(rig.camera.position.z).toBeCloseTo(-6.5, 2);
+    expect(rig.camera.position.z).toBeCloseTo(-12, 2);
   });
 });

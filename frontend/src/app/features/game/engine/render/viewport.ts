@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const MAX_PIXEL_RATIO = 2;
+const MAX_PIXEL_RATIO = 1.5;
 
 export class Viewport {
   readonly renderer: THREE.WebGLRenderer;
@@ -11,9 +11,11 @@ export class Viewport {
     private readonly container: HTMLElement,
     private readonly onAspectChange: (aspect: number) => void,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+    });
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO));
     container.appendChild(this.renderer.domElement);
 

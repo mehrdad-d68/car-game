@@ -2,10 +2,10 @@ import * as THREE from 'three';
 import { CarState } from '../sim/types';
 
 const FIELD_OF_VIEW = 60;
-const NEAR = 0.1;
-const FAR = 1000;
-const FOLLOW_DISTANCE = 6.5;
-const FOLLOW_HEIGHT = 4.5;
+const NEAR = 2;
+const FAR = 2600;
+const FOLLOW_DISTANCE = 12;
+const FOLLOW_HEIGHT = 8;
 const SMOOTHING = 0.001;
 
 export class CameraRig {
@@ -13,6 +13,7 @@ export class CameraRig {
 
   private readonly desired = new THREE.Vector3();
   private readonly lookTarget = new THREE.Vector3();
+  private settled = false;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, aspect, NEAR, FAR);
@@ -30,7 +31,12 @@ export class CameraRig {
       car.position.z + Math.cos(car.heading) * FOLLOW_DISTANCE,
     );
 
-    this.camera.position.lerp(this.desired, 1 - Math.pow(SMOOTHING, dt));
+    if (this.settled) {
+      this.camera.position.lerp(this.desired, 1 - Math.pow(SMOOTHING, dt));
+    } else {
+      this.camera.position.copy(this.desired);
+      this.settled = true;
+    }
 
     this.lookTarget.set(car.position.x, 0, car.position.z);
     this.camera.lookAt(this.lookTarget);
