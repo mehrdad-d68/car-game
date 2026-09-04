@@ -8,15 +8,19 @@ const GROUND_HEIGHT = 0;
 const SIGN_HEIGHT = ROAD_HEIGHT + 0.1;
 const LABEL_RADIUS = 300;
 const LABEL_CELL = 600;
-const MIN_LABEL_WIDTH = 10;
-const ARROW_OFFSET = 18;
+const MIN_LABEL_WIDTH = 6;
+const DIRECTION_ARROW_SPACING = 90;
+const DIRECTION_ARROW_LANE_MARGIN = 1.5;
+const DIRECTION_ARROW_SCALE = 0.45;
+const BARRIER_HEIGHT = 0.9;
+const BARRIER_DEPTH = 1.4;
+const BARRIER_COLOR = 0xffb300;
 
 interface Sign {
   road: PolylineRoad;
   position: Vec2;
   tangent: number;
   label: THREE.Mesh;
-  arrow: THREE.Mesh;
 }
 
 function pointAlong(points: Vec2[], t: number): Vec2 {
@@ -42,8 +46,7 @@ function pointAlong(points: Vec2[], t: number): Vec2 {
   return points[points.length - 1];
 }
 
-function tangentAngle(points: Vec2[], t: number): number {
-  let total = 0;
+function tangentAngle(points: Vec2[], t: number): number {  let total = 0;
   const lengths: number[] = [0];
   for (let i = 0; i < points.length - 1; i++) {
     const dx = points[i + 1].x - points[i].x;
@@ -64,12 +67,246 @@ function tangentAngle(points: Vec2[], t: number): number {
   return Math.atan2(points[last].z - points[last - 1].z, points[last].x - points[last - 1].x);
 }
 
+function polylineLength(points: Vec2[]): number {
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    total += Math.hypot(
+      points[i + 1].x - points[i].x,
+      points[i + 1].z - points[i].z,
+    );
+  }
+  return total;
+}
+
+function longestRoad(roads: PolylineRoad[]): PolylineRoad {
+  let best = roads[0];
+  let bestLen = -1;
+  for (const road of roads) {
+    const len = polylineLength(road.points);
+    if (len > bestLen) {
+      bestLen = len;
+      best = road;
+    }
+  }
+  return best;
+}
+
+export interface StreetLabelPlan {
+  name: string;
+  road: PolylineRoad;
+}
+
+export function planStreetLabels(track: TrackData): StreetLabelPlan[] {
+  const byName = new Map<string, PolylineRoad[]>();
+
+  for (const road of track.roads) {
+    const name = road.name?.trim();
+    if (!name || road.points.length < 2 || road.width < MIN_LABEL_WIDTH) {
+      continue;
+    }
+    let list = byName.get(name);
+    if (!list) {
+      list = [];
+      byName.set(name, list);
+    }
+    list.push(road);
+  }
+
+  const plans: StreetLabelPlan[] = [];
+  for (const [name, roads] of byName) {
+    plans.push({ name, road: longestRoad(roads) });
+  }
+  return plans;
+}
+
+export type DirectionKind = 'forward' | 'reverse';
+
+export interface DirectionArrowPlan {
+  x: number;
+  z: number;
+  phi: number;
+  kind: DirectionKind;
+}
+
+function travelDirections(oneway: 0 | 1 | -1): DirectionKind[] {
+  if (oneway === 1) return ['forward'];
+  if (oneway === -1) return ['reverse'];
+  return ['forward', 'reverse'];
+}
+
+function laneOffset(width: number): number {
+  return Math.max(width / 2 - DIRECTION_ARROW_LANE_MARGIN, DIRECTION_ARROW_LANE_MARGIN);
+}
+
+export function directionArrowRotationY(phi: number): number {
+  return Math.PI / 2 - phi;
+}
+
+export function planDirectionArrows(track: TrackData): DirectionArrowPlan[] {
+  const plans: DirectionArrowPlan[] = [];
+
+  for (const road of track.roads) {
+    const { points, width } = road;
+    if (points.length < 2) continue;
+
+    const dirs = travelDirections(road.oneway);
+    const off = laneOffset(width);
+
+    let total = 0;
+    const lengths: number[] = [0];
+    for (let i = 0; i < points.length - 1; i++) {
+      total += Math.hypot(
+        points[i + 1].x - points[i].x,
+        points[i + 1].z - points[i].z,
+      );
+      lengths.push(total);
+    }
+    if (total < 1e-6) continue;
+
+    const n = Math.max(1, Math.floor(total / DIRECTION_ARROW_SPACING));
+
+    for (let i = 0; i < n; i++) {
+      const target = ((i + 0.5) / n) * total;
+
+      let px = points[points.length - 1].x;
+      let pz = points[points.length - 1].z;
+      let a = 0;
+      for (let k = 0; k < lengths.length - 1; k++) {
+        if (target <= lengths[k + 1]) {
+          const segLen = lengths[k + 1] - lengths[k] || 1;
+          const u = (target - lengths[k]) / segLen;
+          px = points[k].x + (points[k + 1].x - points[k].x) * u;
+          pz = points[k].z + (points[k + 1].z - points[k].z) * u;
+          a = Math.atan2(
+            points[k + 1].z - points[k].z,
+            points[k + 1].x - points[k].x,
+          );
+          break;
+        }
+      }
+
+      for (const kind of dirs) {
+        const phi = kind === 'forward' ? a : a + Math.PI;
+        const nx = -Math.sin(a);
+        const nz = Math.cos(a);
+        const side = kind === 'forward' ? 1 : -1;
+        plans.push({
+          x: px + nx * off * side,
+          z: pz + nz * off * side,
+          phi,
+          kind,
+        });
+      }
+    }
+  }
+
+  return plans;
+}
+
+export interface BarrierPlan {
+  x: number;
+  z: number;
+  ux: number;
+  uz: number;
+  length: number;
+}
+
+const BARRIER_SCALE = 1.3;
+const BARRIER_RETREAT = 1.6;
+
+function roadAccess(road: PolylineRoad): string {
+  return (road.access ?? '').trim().toLowerCase();
+}
+
+function isPrivateRoad(road: PolylineRoad): boolean {
+  return roadAccess(road) === 'private';
+}
+
+function entranceTangent(
+  points: Vec2[],
+  end: 'start' | 'end',
+): { tangent: number; inwardX: number; inwardZ: number } {
+  let nx: number;
+  let nz: number;
+
+  if (end === 'start') {
+    nx = points[1].x - points[0].x;
+    nz = points[1].z - points[0].z;
+  } else {
+    const idx = points.length - 1;
+    nx = points[idx].x - points[idx - 1].x;
+    nz = points[idx].z - points[idx - 1].z;
+  }
+
+  const len = Math.hypot(nx, nz) || 1;
+  const tangent = Math.atan2(nz, nx);
+  const inwardX = end === 'start' ? nx / len : -nx / len;
+  const inwardZ = end === 'start' ? nz / len : -nz / len;
+
+  return { tangent, inwardX, inwardZ };
+}
+
+function midpoint(points: Vec2[]): Vec2 {
+  let x = 0;
+  let z = 0;
+  for (const p of points) {
+    x += p.x;
+    z += p.z;
+  }
+  return { x: x / points.length, z: z / points.length };
+}
+
+export function planBarriers(track: TrackData): BarrierPlan[] {
+  const plans: BarrierPlan[] = [];
+
+  for (const road of track.roads) {
+    if (!isPrivateRoad(road)) continue;
+    const pts = road.points;
+    if (pts.length < 2) continue;
+
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    const closed = Math.hypot(last.x - first.x, last.z - first.z) < 1e-6;
+
+    const length = road.width * BARRIER_SCALE;
+    const ends: ('start' | 'end')[] = closed ? ['start'] : ['start', 'end'];
+    const anyPoint = closed ? midpoint(pts) : first;
+
+    for (const end of ends) {
+      const { tangent, inwardX, inwardZ } = entranceTangent(pts, end);
+      const origin = end === 'start' ? anyPoint : last;
+      const cx = origin.x + inwardX * BARRIER_RETREAT;
+      const cz = origin.z + inwardZ * BARRIER_RETREAT;
+
+      plans.push({
+        x: cx,
+        z: cz,
+        ux: -Math.sin(tangent),
+        uz: Math.cos(tangent),
+        length,
+      });
+    }
+  }
+
+  return plans;
+}
+
+function barrierRotationY(ux: number, uz: number): number {
+  return Math.atan2(-uz, ux);
+}
+
 export class TrackView {
   readonly group = new THREE.Group();
 
   private readonly signs: Sign[] = [];
   private readonly cells = new Map<number, Sign[]>();
   private readonly lastWindow = new Set<number>();
+  private readonly arrowMeshes: { mesh: THREE.Mesh; position: Vec2 }[] = [];
+  private readonly arrowCells = new Map<number, { mesh: THREE.Mesh; position: Vec2 }[]>();
+  private readonly lastArrowWindow = new Set<number>();
+  private readonly barrierMeshes: { mesh: THREE.Mesh; position: Vec2 }[] = [];
+  private readonly barrierCells = new Map<number, { mesh: THREE.Mesh; position: Vec2 }[]>();
+  private readonly lastBarrierWindow = new Set<number>();
   private readonly disposables: { dispose(): void }[] = [];
 
   constructor(private readonly track: TrackData) {
@@ -79,6 +316,8 @@ export class TrackView {
 
   buildLabels(): void {
     this.buildSigns();
+    this.buildDirectionArrows();
+    this.buildBarriers();
   }
 
   private own<T extends { dispose(): void }>(resource: T): T {
@@ -120,35 +359,23 @@ export class TrackView {
   }
 
   private buildSigns(): void {
-    for (const road of this.track.roads) {
-      if (!road.name || road.points.length < 2 || road.width < MIN_LABEL_WIDTH) {
-        continue;
-      }
-
+    for (const plan of planStreetLabels(this.track)) {
+      const { name, road } = plan;
       const position = pointAlong(road.points, 0.5);
       const tangent = tangentAngle(road.points, 0.5);
 
-      const label = makeLabelMesh(road.name, 'white');
+      const label = makeLabelMesh(name, 'white');
       if (!label) continue;
-
-      const arrow = makeArrowMesh();
-      if (!arrow) continue;
 
       label.rotation.set(-Math.PI / 2, 0, -tangent);
       label.position.set(position.x, SIGN_HEIGHT, position.z);
+      label.renderOrder = 5;
       label.visible = false;
       this.group.add(label);
 
-      const arrowX = position.x - Math.cos(tangent) * ARROW_OFFSET;
-      const arrowZ = position.z - Math.sin(tangent) * ARROW_OFFSET;
-      arrow.rotation.set(-Math.PI / 2, 0, Math.PI / 2 - tangent);
-      arrow.position.set(arrowX, SIGN_HEIGHT, arrowZ);
-      arrow.visible = false;
-      this.group.add(arrow);
+      const sign = { road, position, tangent, label };
+      this.signs.push(sign);
 
-      this.signs.push({ road, position, tangent, label, arrow });
-
-      const sign = this.signs[this.signs.length - 1];
       const cell = this.cellKey(position.x, position.z);
       let bucket = this.cells.get(cell);
       if (!bucket) {
@@ -156,6 +383,57 @@ export class TrackView {
         this.cells.set(cell, bucket);
       }
       bucket.push(sign);
+    }
+  }
+
+  private buildDirectionArrows(): void {
+    for (const plan of planDirectionArrows(this.track)) {
+      const mesh = makeArrowMesh();
+      if (!mesh) continue;
+
+      mesh.rotation.set(-Math.PI / 2, 0, directionArrowRotationY(plan.phi));
+      mesh.position.set(plan.x, SIGN_HEIGHT, plan.z);
+      mesh.scale.setScalar(DIRECTION_ARROW_SCALE);
+      mesh.visible = false;
+      this.group.add(mesh);
+
+      const entry = { mesh, position: { x: plan.x, z: plan.z } };
+      this.arrowMeshes.push(entry);
+
+      const cell = this.cellKey(plan.x, plan.z);
+      let bucket = this.arrowCells.get(cell);
+      if (!bucket) {
+        bucket = [];
+        this.arrowCells.set(cell, bucket);
+      }
+      bucket.push(entry);
+    }
+  }
+
+  private buildBarriers(): void {
+    for (const plan of planBarriers(this.track)) {
+      const geometry = this.own(
+        new THREE.BoxGeometry(plan.length, BARRIER_HEIGHT, BARRIER_DEPTH),
+      );
+      const material = this.own(
+        new THREE.MeshLambertMaterial({ color: BARRIER_COLOR }),
+      );
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(plan.x, BARRIER_HEIGHT / 2, plan.z);
+      mesh.rotation.y = barrierRotationY(plan.ux, plan.uz);
+      mesh.visible = false;
+      this.group.add(mesh);
+
+      const entry = { mesh, position: { x: plan.x, z: plan.z } };
+      this.barrierMeshes.push(entry);
+
+      const cell = this.cellKey(plan.x, plan.z);
+      let bucket = this.barrierCells.get(cell);
+      if (!bucket) {
+        bucket = [];
+        this.barrierCells.set(cell, bucket);
+      }
+      bucket.push(entry);
     }
   }
 
@@ -182,7 +460,26 @@ export class TrackView {
         if (bucket) {
           for (const sign of bucket) {
             sign.label.visible = false;
-            sign.arrow.visible = false;
+          }
+        }
+      }
+    }
+    for (const cell of this.lastArrowWindow) {
+      if (!window.has(cell)) {
+        const bucket = this.arrowCells.get(cell);
+        if (bucket) {
+          for (const entry of bucket) {
+            entry.mesh.visible = false;
+          }
+        }
+      }
+    }
+    for (const cell of this.lastBarrierWindow) {
+      if (!window.has(cell)) {
+        const bucket = this.barrierCells.get(cell);
+        if (bucket) {
+          for (const entry of bucket) {
+            entry.mesh.visible = false;
           }
         }
       }
@@ -190,21 +487,47 @@ export class TrackView {
 
     for (const cell of window) {
       const bucket = this.cells.get(cell);
-      if (!bucket) {
-        continue;
+      if (bucket) {
+        for (const sign of bucket) {
+          const ddx = sign.position.x - carX;
+          const ddz = sign.position.z - carZ;
+          const near = ddx * ddx + ddz * ddz <= radiusSq;
+          sign.label.visible = near;
+        }
       }
-      for (const sign of bucket) {
-        const ddx = sign.position.x - carX;
-        const ddz = sign.position.z - carZ;
-        const near = ddx * ddx + ddz * ddz <= radiusSq;
-        sign.label.visible = near;
-        sign.arrow.visible = near;
+
+      const arrowBucket = this.arrowCells.get(cell);
+      if (arrowBucket) {
+        for (const entry of arrowBucket) {
+          const ddx = entry.position.x - carX;
+          const ddz = entry.position.z - carZ;
+          const near = ddx * ddx + ddz * ddz <= radiusSq;
+          entry.mesh.visible = near;
+        }
+      }
+
+      const barrierBucket = this.barrierCells.get(cell);
+      if (barrierBucket) {
+        for (const entry of barrierBucket) {
+          const ddx = entry.position.x - carX;
+          const ddz = entry.position.z - carZ;
+          const near = ddx * ddx + ddz * ddz <= radiusSq;
+          entry.mesh.visible = near;
+        }
       }
     }
 
     this.lastWindow.clear();
     for (const cell of window) {
       this.lastWindow.add(cell);
+    }
+    this.lastArrowWindow.clear();
+    for (const cell of window) {
+      this.lastArrowWindow.add(cell);
+    }
+    this.lastBarrierWindow.clear();
+    for (const cell of window) {
+      this.lastBarrierWindow.add(cell);
     }
   }
 
@@ -350,6 +673,11 @@ export class TrackView {
 
   dispose(): void {
     this.signs.length = 0;
+    this.arrowMeshes.length = 0;
+    this.arrowCells.clear();
+    this.cells.clear();
+    this.barrierMeshes.length = 0;
+    this.barrierCells.clear();
     for (const resource of this.disposables) {
       resource.dispose();
     }

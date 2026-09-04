@@ -26,11 +26,14 @@ export class Engine {
   private car: CarState;
   private previousCar: CarState;
 
+  readonly track: TrackData;
+
   private constructor(
     container: HTMLElement,
     input: InputSource,
     track: TrackData,
   ) {
+    this.track = track;
     const built = createScene();
     this.scene = built.scene;
     this.lights = built.lights;
@@ -83,6 +86,13 @@ export class Engine {
     this.lights.sun.target.updateMatrixWorld();
 
     this.viewport.renderer.render(this.scene, this.rig.camera);
+  }
+
+  teleportTo(x: number, z: number, heading: number): void {
+    const spawned: CarState = { position: { x, z }, heading, speed: 0 };
+    this.car = spawned;
+    this.previousCar = spawned;
+    this.rig.snap();
   }
 
   dispose(): void {

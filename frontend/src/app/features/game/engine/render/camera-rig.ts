@@ -24,6 +24,10 @@ export class CameraRig {
     this.camera.updateProjectionMatrix();
   }
 
+  snap(): void {
+    this.settled = false;
+  }
+
   follow(car: CarState, dt: number): void {
     this.desired.set(
       car.position.x + Math.sin(car.heading) * FOLLOW_DISTANCE,

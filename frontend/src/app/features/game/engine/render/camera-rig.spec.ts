@@ -26,4 +26,18 @@ describe('CameraRig', () => {
 
     expect(rig.camera.position.z).toBeCloseTo(-12, 2);
   });
+
+  it('cuts to the new position when snapped, without lerping', () => {
+    const rig = new CameraRig(16 / 9);
+    for (let i = 0; i < 300; i++) {
+      rig.follow(AT_ORIGIN, 1 / 60);
+    }
+
+    const far: CarState = { position: { x: 500, z: 500 }, heading: 0, speed: 0 };
+    rig.snap();
+    rig.follow(far, 1 / 60);
+
+    expect(rig.camera.position.x).toBeCloseTo(500, 1);
+    expect(rig.camera.position.z).toBeCloseTo(512, 1);
+  });
 });
