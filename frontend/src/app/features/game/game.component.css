@@ -17,3 +17,10 @@
   left: 1rem;
   z-index: 10;
 }
+
+.car-select-overlay {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 10;
+}

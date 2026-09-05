@@ -1,0 +1,9 @@
+<p-select
+  [options]="cars()"
+  [ngModel]="selected()"
+  (ngModelChange)="selected.set($event)"
+  optionLabel="name"
+  placeholder="Select car..."
+  styleClass="car-select"
+  (onChange)="onSelect($event.value)"
+/>

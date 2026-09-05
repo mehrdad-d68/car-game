@@ -9,9 +9,12 @@ import {
   viewChild,
 } from '@angular/core';
 import { InputService } from '../../core/services/input.service';
+import { BackendCarSource } from './adapters/backend-car-source';
+import { BackendTrackSource } from './adapters/backend-track-source';
 import { KeyboardInput } from './adapters/keyboard-input';
-import { MapTrackSource } from './adapters/map-track-source';
+import { CarSelectComponent } from './car-select/car-select.component';
 import { Engine } from './engine';
+import { CarSpec } from './engine/sim/car-spec';
 import {
   StreetOption,
   StreetSearchComponent,
@@ -19,7 +22,7 @@ import {
 
 @Component({
   selector: 'app-game',
-  imports: [StreetSearchComponent],
+  imports: [StreetSearchComponent, CarSelectComponent],
   templateUrl: './game.component.html',
   styleUrl: './game.component.css',
 })
@@ -27,6 +30,7 @@ export class GameComponent implements AfterViewInit, OnDestroy {
   private readonly container =
     viewChild.required<ElementRef<HTMLDivElement>>('gameContainer');
   private readonly streetSearch = viewChild.required(StreetSearchComponent);
+  private readonly carSelect = viewChild.required(CarSelectComponent);
   private readonly keys = inject(InputService);
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
@@ -38,19 +42,25 @@ export class GameComponent implements AfterViewInit, OnDestroy {
     this.engine = await Engine.create(
       this.container().nativeElement,
       new KeyboardInput(this.keys),
-      new MapTrackSource(this.http, this.destroyRef),
+      new BackendTrackSource(this.http, this.destroyRef),
+      new BackendCarSource(this.http, this.destroyRef),
     );
     if (this.destroyed) {
       this.engine.dispose();
       return;
     }
     this.streetSearch().setTrack(this.engine.track);
+    this.carSelect().setCars(this.engine.cars, this.engine.activeCar);
     this.engine.start();
   }
 
   onStreetSelected(street: StreetOption | null): void {
     if (!street) return;
     this.engine?.teleportTo(street.x, street.z, street.heading);
+  }
+
+  onCarSelected(spec: CarSpec): void {
+    void this.engine?.setCar(spec);
   }
 
   ngOnDestroy(): void {

@@ -142,8 +142,7 @@ determinism. `loop.ts` owns this; don't bypass it.
 
 ## Conventions
 
-- **Never commit or push.** Do not run `git commit`, `git push`, or similar,
-  unless the user explicitly asks. Leave changes in the working tree.
+- **Never commit or push — no exceptions.** See the dedicated section below.
 - **No code comments** unless explicitly requested.
 - Follow the existing file style in the neighboring files.
 - Match the package manager / scripts already in place
@@ -157,13 +156,68 @@ determinism. `loop.ts` owns this; don't bypass it.
   - Backend: `cd backend && npm run build`
   - Frontend: `cd frontend && npm run build` and `npx ng test --watch=false`
 
+## Never commit or push — no exceptions
+
+**Never run any command that commits, pushes, or otherwise rewrites history
+unless the user asks for it in that specific message.** The user owns version
+control entirely.
+
+This includes, and is not limited to:
+
+```
+git commit          git commit --amend      git push
+git merge           git rebase              git cherry-pick
+git tag             git reset --hard        git stash
+gh pr create        gh pr merge
+```
+
+Do not stage either — no `git add`. Leave every change in the working tree,
+unstaged, exactly where it lands.
+
+This holds **regardless of the circumstances**:
+
+- No matter how small, safe, or obviously correct the change is
+- No matter that the build passes and every test is green
+- No matter that the work is finished and verified
+- No matter that a previous message authorised a commit — **permission never
+  carries forward**; it applies once, to that request only
+- No matter that committing seems implied by the task
+
+If you believe something should be committed, **say so and stop**. Describe what
+you would commit and wait. Offering is correct; acting is not.
+
+## Plans
+
+Every implementation plan and design document belongs in the **`plans/`**
+directory at the repository root — never in a scratch directory, temp path, or
+any location outside the repo. A predictable path means any session, in any tool,
+can find them.
+
+`plans/` is **gitignored**: plans are local working notes, not committed
+artifacts. They will not show up in `git status` and must never be staged.
+
+Name files `NNN-kebab-case-title.md` with a zero-padded three-digit sequence
+number, so the directory sorts in creation order by name:
+
+```
+plans/001-move-map-and-cars-to-backend.md
+plans/002-...
+```
+
+Before writing a new plan, list `plans/` and take the next unused number. Do not
+renumber or overwrite existing plans — supersede them with a new numbered file.
+
 ## Code reviews
 
 **`code-review.md`** (repository root) is the only place review findings live. It
-contains its own Protocol section — read it before reviewing or fixing.
+is **gitignored and generated** — a missing file is normal, not an error. These
+rules are the authoritative copy; the file only mirrors them.
 
-**"do a code review"** — review the changes, then **overwrite `code-review.md`**
-with the findings, removing the previous contents (keep its Protocol section).
+**"do a code review"** — review the changes, then write the findings to
+`code-review.md`. **Create the file if it is missing**; if it exists,
+**overwrite it**, removing the previous findings. The result always opens with
+the Protocol section, then the findings.
+
 Group by severity: **P1 correctness**, **P2 logic**, **P3 consistency**. Every
 finding says what is wrong, **why**, and where as a `path:line` reference, with
 measured evidence where possible. Always include a **What's done well** section.

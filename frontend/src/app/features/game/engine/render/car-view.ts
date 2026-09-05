@@ -1,21 +1,25 @@
 import * as THREE from 'three';
+import { CarAppearance, CarLamp } from '../sim/car-spec';
 import { CarState } from '../sim/types';
 import { ROAD_HEIGHT } from './constants';
-
-const WHEEL_POSITIONS: [number, number, number][] = [
-  [-0.95, 0.32, 1.2],
-  [0.95, 0.32, 1.2],
-  [-0.95, 0.32, -1.2],
-  [0.95, 0.32, -1.2],
-];
+import { disposeModel } from './model-loader';
 
 export class CarView {
   readonly group = new THREE.Group();
 
   private readonly disposables: { dispose(): void }[] = [];
+  private readonly modelGroup: THREE.Group | null;
 
-  constructor() {
-    this.build();
+  constructor(
+    private readonly appearance: CarAppearance,
+    modelGroup?: THREE.Group,
+  ) {
+    this.modelGroup = modelGroup ?? null;
+    if (modelGroup) {
+      this.group.add(modelGroup);
+    } else {
+      this.build();
+    }
   }
 
   private track<T extends { dispose(): void }>(resource: T): T {
@@ -23,48 +27,60 @@ export class CarView {
     return resource;
   }
 
-  private build(): void {
-    const bodyMat = this.track(new THREE.MeshStandardMaterial({ color: 0xd32f2f }));
-    const glassMat = this.track(
-      new THREE.MeshStandardMaterial({ color: 0x90caf9, metalness: 0.4, roughness: 0.2 }),
+  private addBox(
+    part: { width: number; height: number; length: number; color: number; position: [number, number, number] },
+    castShadow: boolean,
+  ): void {
+    const mat = this.track(new THREE.MeshStandardMaterial({ color: part.color }));
+    const mesh = new THREE.Mesh(
+      this.track(new THREE.BoxGeometry(part.width, part.height, part.length)),
+      mat,
     );
-    const wheelMat = this.track(new THREE.MeshStandardMaterial({ color: 0x212121 }));
-    const headlightMat = this.track(
+    mesh.position.set(part.position[0], part.position[1], part.position[2]);
+    mesh.castShadow = castShadow;
+    this.group.add(mesh);
+  }
+
+  private addLamps(lamp: CarLamp): void {
+    const mat = this.track(
       new THREE.MeshStandardMaterial({
-        color: 0xfff9c4,
-        emissive: 0xffff99,
-        emissiveIntensity: 0.6,
+        color: lamp.color,
+        emissive: lamp.emissive,
+        emissiveIntensity: lamp.emissiveIntensity,
       }),
     );
-    const tailMat = this.track(
-      new THREE.MeshStandardMaterial({ color: 0xff5252, emissive: 0xff0000, emissiveIntensity: 0.4 }),
+    const geo = this.track(new THREE.BoxGeometry(lamp.width, lamp.height, lamp.length));
+    for (const [x, y, z] of lamp.positions) {
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set(x, y, z);
+      this.group.add(mesh);
+    }
+  }
+
+  private build(): void {
+    this.addBox(this.appearance.body, true);
+    this.addBox(this.appearance.cabin, false);
+
+    const wheelGeo = this.track(
+      new THREE.CylinderGeometry(
+        this.appearance.wheel.radius,
+        this.appearance.wheel.radius,
+        this.appearance.wheel.width,
+        16,
+      ),
     );
-
-    const body = new THREE.Mesh(this.track(new THREE.BoxGeometry(1.8, 0.5, 3.6)), bodyMat);
-    body.position.y = 0.35;
-    body.castShadow = true;
-    this.group.add(body);
-
-    const cabin = new THREE.Mesh(this.track(new THREE.BoxGeometry(1.4, 0.45, 1.6)), glassMat);
-    cabin.position.set(0, 0.85, -0.2);
-    this.group.add(cabin);
-
-    const wheelGeo = this.track(new THREE.CylinderGeometry(0.32, 0.32, 0.25, 16));
     wheelGeo.rotateZ(Math.PI / 2);
-    for (const [x, y, z] of WHEEL_POSITIONS) {
+    const wheelMat = this.track(
+      new THREE.MeshStandardMaterial({ color: this.appearance.wheel.color }),
+    );
+    for (const [x, y, z] of this.appearance.wheel.positions) {
       const wheel = new THREE.Mesh(wheelGeo, wheelMat);
       wheel.position.set(x, y, z);
       this.group.add(wheel);
     }
 
-    const lampGeo = this.track(new THREE.BoxGeometry(0.3, 0.15, 0.05));
-    for (const x of [-0.5, 0.5]) {
-      const headlight = new THREE.Mesh(lampGeo, headlightMat);
-      headlight.position.set(x, 0.35, 1.8);
-      const taillight = new THREE.Mesh(lampGeo, tailMat);
-      taillight.position.set(x, 0.35, -1.8);
-      this.group.add(headlight, taillight);
-    }
+    this.addLamps(this.appearance.headlight);
+    this.addLamps(this.appearance.taillight);
   }
 
   sync(previous: CarState, current: CarState, alpha: number): void {
@@ -81,5 +97,8 @@ export class CarView {
       resource.dispose();
     }
     this.disposables.length = 0;
+    if (this.modelGroup) {
+      disposeModel(this.modelGroup);
+    }
   }
 }
