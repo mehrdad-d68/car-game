@@ -1,2 +1,2 @@
 export { Engine } from './engine';
-export type { InputFrame, InputSource, TrackSource } from './ports';
+export type { InputFrame, InputSource, TrackSource, CarSource } from './ports';

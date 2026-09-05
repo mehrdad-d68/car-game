@@ -1,5 +1,6 @@
 import { InputFrame } from '../ports';
-import { createCarState, stepVehicle } from './vehicle';
+import { CarHandling } from './car-spec';
+import { createCarState, stepVehicle, DEFAULT_HANDLING } from './vehicle';
 
 const IDLE: InputFrame = { throttle: 0, steer: 0, brake: false };
 const DT = 1 / 60;
@@ -81,5 +82,29 @@ describe('stepVehicle', () => {
     }
     expect(state.speed).toBeCloseTo(-8, 3);
     expect(state.speed).toBeGreaterThanOrEqual(-8);
+  });
+
+  it('accelerates differently for different handling specs', () => {
+    const hot: CarHandling = { ...DEFAULT_HANDLING, enginePower: 40 };
+    let stock = createCarState();
+    let tuned = createCarState();
+
+    for (let i = 0; i < 60; i++) {
+      stock = stepVehicle(stock, { ...IDLE, throttle: 1 }, DT);
+      tuned = stepVehicle(tuned, { ...IDLE, throttle: 1 }, DT, hot);
+    }
+
+    expect(tuned.speed).toBeGreaterThan(stock.speed);
+  });
+
+  it('caps reverse speed per handling spec', () => {
+    const slow: CarHandling = { ...DEFAULT_HANDLING, maxReverseSpeed: 4 };
+    let state = createCarState();
+
+    for (let i = 0; i < 600; i++) {
+      state = stepVehicle(state, { ...IDLE, throttle: -1 }, DT, slow);
+    }
+
+    expect(state.speed).toBeCloseTo(-4, 3);
   });
 });

@@ -5,9 +5,9 @@ import { TrackSource } from '../engine/ports';
 import { OSMMapData } from '../engine/sim/osm-types';
 import { createTrack, TrackData } from '../engine/sim/track';
 
-const MAP_PATH = 'assets/map/vienna-roads.json';
+const MAP_URL = '/api/map';
 
-export class MapTrackSource implements TrackSource {
+export class BackendTrackSource implements TrackSource {
   constructor(
     private readonly http: HttpClient,
     private readonly destroyRef: DestroyRef,
@@ -16,7 +16,7 @@ export class MapTrackSource implements TrackSource {
   loadTrack(): Promise<TrackData> {
     return new Promise<TrackData>((resolve, reject) => {
       this.http
-        .get<OSMMapData>(MAP_PATH)
+        .get<OSMMapData>(MAP_URL)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (data) => resolve(createTrack(data)),
