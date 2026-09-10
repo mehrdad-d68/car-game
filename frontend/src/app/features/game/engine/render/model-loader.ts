@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CarModel } from '../sim/car-spec';
+import { PropModel } from '../sim/prop-spec';
 
 export interface ModelFit {
   scale: number;
@@ -76,7 +77,11 @@ export function disposeModel(group: THREE.Group): void {
   });
 }
 
-export async function loadCarModel(url: string, model: CarModel): Promise<THREE.Group> {
+export async function loadModel(
+  url: string,
+  targetLength: number,
+  yawOffset: number,
+): Promise<THREE.Group> {
   const data = await fetchModelBinary(url);
   const group = await new Promise<THREE.Group>((resolve, reject) => {
     new GLTFLoader().parse(data, extractBaseUrl(url), (gltf) => {
@@ -89,12 +94,12 @@ export async function loadCarModel(url: string, model: CarModel): Promise<THREE.
   const fit = fitModel(
     Math.max(size.x, size.y, size.z),
     bounds.min.y,
-    model.targetLength,
+    targetLength,
   );
 
   group.scale.setScalar(fit.scale);
   group.position.y = fit.lift;
-  group.rotation.y = model.yawOffset;
+  group.rotation.y = yawOffset;
 
   group.traverse((object) => {
     if (object instanceof THREE.Mesh) {
@@ -103,4 +108,12 @@ export async function loadCarModel(url: string, model: CarModel): Promise<THREE.
   });
 
   return group;
+}
+
+export async function loadCarModel(url: string, model: CarModel): Promise<THREE.Group> {
+  return loadModel(url, model.targetLength, model.yawOffset);
+}
+
+export function loadPropModel(model: PropModel): Promise<THREE.Group> {
+  return loadModel(model.url, model.targetLength, model.yawOffset);
 }

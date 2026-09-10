@@ -209,21 +209,22 @@ describe('TrackView', () => {
       expect(plans.some((p) => p.name === 'Gregorygasse')).toBe(true);
     });
 
-    it('deduplicates a street split across segments into one label', () => {
+    it('merges segments of the same street into a single label run', () => {
       const plans = planStreetLabels(createTrack(DATA));
-      expect(plans.filter((p) => p.name === 'Gregorygasse')).toHaveLength(1);
+      expect(plans.filter((p) => p.name === 'Gregorygasse')).toHaveLength(3);
     });
 
-    it('picks the longest segment for a split street', () => {
-      const plans = planStreetLabels(createTrack(DATA));
-      const gregory = plans.find((p) => p.name === 'Gregorygasse');
-      expect(gregory).toBeDefined();
-      expect(gregory!.road.points).toHaveLength(2);
-      expect(gregory!.road.points[0].x).toBe(10);
-      expect(gregory!.road.points[1].x).toBe(200);
+    it('spreads repeated labels along the whole merged street', () => {
+      const plans = planStreetLabels(createTrack(DATA))
+        .filter((p) => p.name === 'Gregorygasse')
+        .sort((a, b) => a.position.x - b.position.x);
+      expect(plans[0].position.x).toBeCloseTo(33.333, 1);
+      expect(plans[1].position.x).toBeCloseTo(100, 1);
+      expect(plans[2].position.x).toBeCloseTo(166.667, 1);
+      expect(plans.every((p) => Math.abs(p.position.z) < 1e-6)).toBe(true);
     });
 
-    it('plans a label for every named road (width quantizes to at least 6)', () => {
+    it('labels every named road regardless of size', () => {
       const plans = planStreetLabels(createTrack(DATA));
       const names = plans.map((p) => p.name);
       expect(names).toEqual(expect.arrayContaining(['Gregorygasse', 'Solo', 'Lane']));
