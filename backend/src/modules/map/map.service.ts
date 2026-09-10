@@ -1,12 +1,6 @@
 import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  watch,
-  writeFileSync,
-} from 'node:fs';
+import { readFileSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { OSMMapData } from './osm-types';
@@ -46,16 +40,6 @@ export class MapService implements OnModuleInit, OnModuleDestroy {
 
   getEtag(): string {
     return this.etag;
-  }
-
-  replaceMap(data: OSMMapData): void {
-    const raw = JSON.stringify(data);
-    mkdirSync(dirname(this.dataPath), { recursive: true });
-    const tmp = `${this.dataPath}.${process.pid}.tmp`;
-    writeFileSync(tmp, raw, 'utf8');
-    renameSync(tmp, this.dataPath);
-    this.data = data;
-    this.etag = toEtag(raw);
   }
 
   private startWatching(): void {
