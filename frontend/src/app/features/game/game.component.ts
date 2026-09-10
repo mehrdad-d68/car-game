@@ -20,13 +20,10 @@ import {
   StreetOption,
   StreetSearchComponent,
 } from './street-search/street-search.component';
-import { LoadMapComponent } from './load-map/load-map.component';
-import { OSMMapData } from './engine/sim/osm-types';
-import { createTrack } from './engine/sim/track';
 
 @Component({
   selector: 'app-game',
-  imports: [StreetSearchComponent, CarSelectComponent, LoadMapComponent],
+  imports: [StreetSearchComponent, CarSelectComponent],
   templateUrl: './game.component.html',
   styleUrl: './game.component.css',
 })
@@ -66,13 +63,6 @@ export class GameComponent implements AfterViewInit, OnDestroy {
 
   onCarSelected(spec: CarSpec): void {
     void this.engine?.setCar(spec);
-  }
-
-  onMapValidated(map: OSMMapData): void {
-    if (!this.engine) return;
-    const track = createTrack(map);
-    void this.engine.setTrack(track);
-    this.streetSearch().setTrack(track);
   }
 
   ngOnDestroy(): void {
