@@ -8,7 +8,10 @@ const GROUND_HEIGHT = 0;
 const SIGN_HEIGHT = ROAD_HEIGHT + 0.1;
 const LABEL_RADIUS = 300;
 const LABEL_CELL = 600;
-const MIN_LABEL_WIDTH = 6;
+const LABEL_SPACING = 60;
+const LABEL_MIN_LENGTH = 3;
+const LABEL_JOIN_TOLERANCE = 8;
+const LABEL_SCALE = 0.75;
 const DIRECTION_ARROW_SPACING = 90;
 const DIRECTION_ARROW_LANE_MARGIN = 1.5;
 const DIRECTION_ARROW_SCALE = 0.45;
@@ -17,9 +20,7 @@ const BARRIER_DEPTH = 1.4;
 const BARRIER_COLOR = 0xffb300;
 
 interface Sign {
-  road: PolylineRoad;
   position: Vec2;
-  tangent: number;
   label: THREE.Mesh;
 }
 
@@ -78,43 +79,72 @@ function polylineLength(points: Vec2[]): number {
   return total;
 }
 
-function longestRoad(roads: PolylineRoad[]): PolylineRoad {
-  let best = roads[0];
-  let bestLen = -1;
-  for (const road of roads) {
-    const len = polylineLength(road.points);
-    if (len > bestLen) {
-      bestLen = len;
-      best = road;
-    }
-  }
-  return best;
-}
-
 export interface StreetLabelPlan {
   name: string;
-  road: PolylineRoad;
+  position: Vec2;
+  tangent: number;
 }
 
 export function planStreetLabels(track: TrackData): StreetLabelPlan[] {
-  const byName = new Map<string, PolylineRoad[]>();
+  const groups = new Map<string, Vec2[][]>();
 
   for (const road of track.roads) {
     const name = road.name?.trim();
-    if (!name || road.points.length < 2 || road.width < MIN_LABEL_WIDTH) {
-      continue;
+    if (!name || road.points.length < 2) continue;
+    const pts = road.points.slice();
+    if (polylineLength(pts) < LABEL_MIN_LENGTH) continue;
+
+    let placed = false;
+    for (const chains of groups.values()) {
+      for (const chain of chains) {
+        if (
+          Math.hypot(
+            chain[chain.length - 1].x - pts[0].x,
+            chain[chain.length - 1].z - pts[0].z,
+          ) <= LABEL_JOIN_TOLERANCE
+        ) {
+          chain.push(...pts.slice(1));
+          placed = true;
+          break;
+        }
+        if (
+          Math.hypot(
+            chain[0].x - pts[pts.length - 1].x,
+            chain[0].z - pts[pts.length - 1].z,
+          ) <= LABEL_JOIN_TOLERANCE
+        ) {
+          chain.unshift(...pts.slice(0, -1));
+          placed = true;
+          break;
+        }
+      }
+      if (placed) break;
     }
-    let list = byName.get(name);
-    if (!list) {
-      list = [];
-      byName.set(name, list);
+
+    if (!placed) {
+      let chains = groups.get(name);
+      if (!chains) {
+        chains = [];
+        groups.set(name, chains);
+      }
+      chains.push(pts);
     }
-    list.push(road);
   }
 
   const plans: StreetLabelPlan[] = [];
-  for (const [name, roads] of byName) {
-    plans.push({ name, road: longestRoad(roads) });
+  for (const [name, chains] of groups) {
+    for (const chain of chains) {
+      const total = polylineLength(chain);
+      const n = Math.max(1, Math.round(total / LABEL_SPACING));
+      for (let i = 0; i < n; i++) {
+        const t = (i + 0.5) / n;
+        plans.push({
+          name,
+          position: pointAlong(chain, t),
+          tangent: tangentAngle(chain, t),
+        });
+      }
+    }
   }
   return plans;
 }
@@ -360,23 +390,20 @@ export class TrackView {
 
   private buildSigns(): void {
     for (const plan of planStreetLabels(this.track)) {
-      const { name, road } = plan;
-      const position = pointAlong(road.points, 0.5);
-      const tangent = tangentAngle(road.points, 0.5);
-
-      const label = makeLabelMesh(name, 'white');
+      const label = makeLabelMesh(plan.name, 'white');
       if (!label) continue;
 
-      label.rotation.set(-Math.PI / 2, 0, -tangent);
-      label.position.set(position.x, SIGN_HEIGHT, position.z);
+      label.rotation.set(-Math.PI / 2, 0, -plan.tangent);
+      label.position.set(plan.position.x, SIGN_HEIGHT, plan.position.z);
       label.renderOrder = 5;
+      label.scale.setScalar(LABEL_SCALE);
       label.visible = false;
       this.group.add(label);
 
-      const sign = { road, position, tangent, label };
+      const sign = { position: plan.position, label };
       this.signs.push(sign);
 
-      const cell = this.cellKey(position.x, position.z);
+      const cell = this.cellKey(plan.position.x, plan.position.z);
       let bucket = this.cells.get(cell);
       if (!bucket) {
         bucket = [];

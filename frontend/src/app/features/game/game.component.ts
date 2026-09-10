@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { InputService } from '../../core/services/input.service';
 import { BackendCarSource } from './adapters/backend-car-source';
+import { BackendPropSource } from './adapters/backend-prop-source';
 import { BackendTrackSource } from './adapters/backend-track-source';
 import { KeyboardInput } from './adapters/keyboard-input';
 import { CarSelectComponent } from './car-select/car-select.component';
@@ -19,10 +20,13 @@ import {
   StreetOption,
   StreetSearchComponent,
 } from './street-search/street-search.component';
+import { LoadMapComponent } from './load-map/load-map.component';
+import { OSMMapData } from './engine/sim/osm-types';
+import { createTrack } from './engine/sim/track';
 
 @Component({
   selector: 'app-game',
-  imports: [StreetSearchComponent, CarSelectComponent],
+  imports: [StreetSearchComponent, CarSelectComponent, LoadMapComponent],
   templateUrl: './game.component.html',
   styleUrl: './game.component.css',
 })
@@ -44,6 +48,7 @@ export class GameComponent implements AfterViewInit, OnDestroy {
       new KeyboardInput(this.keys),
       new BackendTrackSource(this.http, this.destroyRef),
       new BackendCarSource(this.http, this.destroyRef),
+      new BackendPropSource(this.http, this.destroyRef),
     );
     if (this.destroyed) {
       this.engine.dispose();
@@ -61,6 +66,13 @@ export class GameComponent implements AfterViewInit, OnDestroy {
 
   onCarSelected(spec: CarSpec): void {
     void this.engine?.setCar(spec);
+  }
+
+  onMapValidated(map: OSMMapData): void {
+    if (!this.engine) return;
+    const track = createTrack(map);
+    void this.engine.setTrack(track);
+    this.streetSearch().setTrack(track);
   }
 
   ngOnDestroy(): void {

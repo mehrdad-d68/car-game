@@ -1,5 +1,6 @@
 import { TrackData } from './sim/track';
 import { CarSpec } from './sim/car-spec';
+import { PropSpec } from './sim/prop-spec';
 
 export interface InputFrame {
   throttle: number;
@@ -17,4 +18,8 @@ export interface TrackSource {
 
 export interface CarSource {
   loadCars(): Promise<CarSpec[]>;
+}
+
+export interface PropSource {
+  loadProps(): Promise<PropSpec[]>;
 }

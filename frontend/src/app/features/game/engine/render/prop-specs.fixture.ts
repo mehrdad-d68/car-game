@@ -1,0 +1,1 @@
+export { PROP_SPECS } from '../../../../../../../backend/src/modules/props/data/prop-specs';
