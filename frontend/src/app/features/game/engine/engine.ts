@@ -6,7 +6,7 @@ import { CarView } from './render/car-view';
 import { FeatureView } from './render/feature-view';
 import { clearModelCache, disposeModel, loadCarModel } from './render/model-loader';
 import { loadPresentModels, presentPropKinds } from './render/prop-models';
-import { createScene, SceneLights } from './render/scene';
+import { createScene, SceneLights, SceneSetup } from './render/scene';
 import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
 import { Viewport } from './render/viewport';
@@ -23,6 +23,7 @@ const DEFAULT_CAR_ID = 'coupe';
 export class Engine {
   private readonly scene: THREE.Scene;
   private readonly lights: SceneLights;
+  private readonly sky: THREE.Color | THREE.Texture | null;
   private trackView: TrackView;
   private featureView: FeatureView;
   private carView: CarView;
@@ -63,9 +64,10 @@ export class Engine {
     this.propModels = propModels;
     this.handling = carSpec.handling;
     this.activeCarSpec = carSpec;
-    const built = createScene();
+    const built: SceneSetup = createScene();
     this.scene = built.scene;
     this.lights = built.lights;
+    this.sky = built.sky;
 
     this.car = createCarState(track.spawn);
     this.previousCar = this.car;
@@ -169,26 +171,6 @@ export class Engine {
     this.rig.snap();
   }
 
-  async setTrack(track: TrackData): Promise<void> {
-    this.scene.remove(this.trackView.group);
-    this.trackView.dispose();
-    this.trackView = new TrackView(track);
-    this.trackView.buildLabels();
-    this.scene.add(this.trackView.group);
-
-    this.scene.remove(this.featureView.group);
-    this.featureView.dispose();
-    for (const group of this.propModels.values()) {
-      disposeModel(group);
-    }
-    this.propModels = await loadPresentModels(this.props, presentPropKinds(track));
-    this.featureView = new FeatureView(track, this.props, this.propModels);
-    this.scene.add(this.featureView.group);
-
-    this.track = track;
-    this.teleportTo(track.spawn.position.x, track.spawn.position.z, track.spawn.heading);
-  }
-
   dispose(): void {
     this.carView.dispose();
     this.trackView.dispose();
@@ -196,6 +178,9 @@ export class Engine {
     this.viewport.dispose();
     for (const group of this.propModels.values()) {
       disposeModel(group);
+    }
+    if (this.sky instanceof THREE.Texture) {
+      this.sky.dispose();
     }
     disposeLabelCache();
     clearModelCache();

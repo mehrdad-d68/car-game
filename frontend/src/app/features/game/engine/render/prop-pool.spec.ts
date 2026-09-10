@@ -57,6 +57,22 @@ describe('PropPool', () => {
     pool.dispose();
   });
 
+  it('refreshes its culling bounds when the instances move', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      2,
+    );
+
+    pool.write([{ matrix: new THREE.Matrix4().makeTranslation(0, 0, 0) }]);
+    pool.mesh.computeBoundingSphere();
+    pool.write([{ matrix: new THREE.Matrix4().makeTranslation(1000, 0, 0) }]);
+
+    if (pool.mesh.boundingSphere === null) pool.mesh.computeBoundingSphere();
+    expect(pool.mesh.boundingSphere!.containsPoint(new THREE.Vector3(1000, 0, 0))).toBe(true);
+    pool.dispose();
+  });
+
   it('releases geometry and material on dispose', () => {
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshLambertMaterial();

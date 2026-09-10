@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MapItemKind } from '../sim/osm-types';
 import { PropPart, PropSpec, PropVariant } from '../sim/prop-spec';
 import { PolylineRoad, TrackData } from '../sim/track';
-import { ROAD_HEIGHT } from './constants';
+import { ROAD_HEIGHT, SURFACE_OFFSET } from './constants';
 import { PartInstance, PropPool } from './prop-pool';
 
 const MARKER_CELL = 600;
@@ -514,6 +514,12 @@ export class FeatureView {
       pool.mesh.name = key;
       pool.mesh.renderOrder = first.renderOrder ?? 0;
       pool.mesh.castShadow = first.castShadow ?? false;
+      if (this.placements[atoms[0].placementIndex].kind === 'pedestrianCrossing') {
+        const material = pool.mesh.material as THREE.Material;
+        material.polygonOffset = true;
+        material.polygonOffsetFactor = SURFACE_OFFSET.decal;
+        material.polygonOffsetUnits = SURFACE_OFFSET.decal;
+      }
 
       const entries = atoms.map((atom) => ({
         placementIndex: atom.placementIndex,
