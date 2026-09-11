@@ -1,9 +1,27 @@
 import { InputFrame } from '../ports';
 import { CarHandling } from './car-spec';
-import { createCarState, stepVehicle, DEFAULT_HANDLING } from './vehicle';
+import { createCarState, interpolateCarState, stepVehicle, DEFAULT_HANDLING } from './vehicle';
 
 const IDLE: InputFrame = { throttle: 0, steer: 0, brake: false };
 const DT = 1 / 60;
+
+describe('interpolateCarState', () => {
+  const previous = { position: { x: 0, z: 0 }, heading: 0, speed: 0 };
+  const current = { position: { x: 10, z: -4 }, heading: 1, speed: 20 };
+
+  it('returns the previous state at alpha 0 and the current state at alpha 1', () => {
+    expect(interpolateCarState(previous, current, 0)).toEqual(previous);
+    expect(interpolateCarState(previous, current, 1)).toEqual(current);
+  });
+
+  it('blends position, heading and speed in between', () => {
+    const blended = interpolateCarState(previous, current, 0.25);
+    expect(blended.position.x).toBeCloseTo(2.5);
+    expect(blended.position.z).toBeCloseTo(-1);
+    expect(blended.heading).toBeCloseTo(0.25);
+    expect(blended.speed).toBeCloseTo(5);
+  });
+});
 
 describe('stepVehicle', () => {
   it('moves the car forward when the throttle is applied', () => {

@@ -6,6 +6,7 @@ import { CarView } from './render/car-view';
 import { FeatureView } from './render/feature-view';
 import { clearModelCache, disposeModel, loadCarModel } from './render/model-loader';
 import { loadPresentModels, presentPropKinds } from './render/prop-models';
+import { compileMaterials } from './render/prepare-scene';
 import { createScene, SceneLights, SceneSetup } from './render/scene';
 import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
@@ -15,7 +16,7 @@ import { MapItemKind } from './sim/osm-types';
 import { PropSpec } from './sim/prop-spec';
 import { TrackData } from './sim/track';
 import { CarState } from './sim/types';
-import { createCarState, stepVehicle } from './sim/vehicle';
+import { createCarState, interpolateCarState, stepVehicle } from './sim/vehicle';
 
 const LIGHT_OFFSET = new THREE.Vector3(50, 80, 30);
 const DEFAULT_CAR_ID = 'coupe';
@@ -112,7 +113,21 @@ export class Engine {
     const modelGroup = spec.model
       ? await Engine.loadModel(spec.model)
       : undefined;
-    return new Engine(container, input, track, cars, spec, props, propModels, modelGroup);
+    const engine = new Engine(container, input, track, cars, spec, props, propModels, modelGroup);
+    await engine.compileScene();
+    return engine;
+  }
+
+  private async compileScene(): Promise<void> {
+    try {
+      await compileMaterials(
+        this.viewport.renderer,
+        this.scene,
+        this.rig.camera,
+      );
+    } catch (error) {
+      console.warn('Shader pre-compilation failed; programs will compile on first use', error);
+    }
   }
 
   async setCar(spec: CarSpec): Promise<void> {
@@ -147,18 +162,19 @@ export class Engine {
   private frame(): void {
     const frameDelta = this.clock.getDelta();
     const alpha = this.loop.advance(frameDelta);
+    const drawn = interpolateCarState(this.previousCar, this.car, alpha);
 
-    this.carView.sync(this.previousCar, this.car, alpha);
-    this.rig.follow(this.car, frameDelta);
-    this.trackView.updateLabels(this.car.position.x, this.car.position.z);
-    this.featureView.update(this.car.position.x, this.car.position.z);
+    this.carView.sync(drawn);
+    this.rig.follow(drawn, frameDelta);
+    this.trackView.updateLabels(drawn.position.x, drawn.position.z);
+    this.featureView.update(drawn.position.x, drawn.position.z);
 
     this.lights.sun.position.set(
-      this.car.position.x + LIGHT_OFFSET.x,
+      drawn.position.x + LIGHT_OFFSET.x,
       LIGHT_OFFSET.y,
-      this.car.position.z + LIGHT_OFFSET.z,
+      drawn.position.z + LIGHT_OFFSET.z,
     );
-    this.lights.sun.target.position.set(this.car.position.x, 0, this.car.position.z);
+    this.lights.sun.target.position.set(drawn.position.x, 0, drawn.position.z);
     this.lights.sun.target.updateMatrixWorld();
 
     this.viewport.renderer.render(this.scene, this.rig.camera);

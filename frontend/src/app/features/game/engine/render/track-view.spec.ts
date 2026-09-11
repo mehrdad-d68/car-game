@@ -5,6 +5,7 @@ import { cumulativeDistances, metresToUv } from './road-textures';
 import { SURFACE_OFFSET } from './constants';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import {
+  type BarrierPlan,
   directionArrowRotationY,
   filterArrowsByJunctions,
   planBarriers,
@@ -388,7 +389,12 @@ describe('TrackView', () => {
   });
 
   describe('planBarriers', () => {
-    function barrierTrack() {
+    function barrierTrack(
+      privatePoints: { x: number; z: number }[] = [
+        { x: 0, z: 0 },
+        { x: 40, z: 0 },
+      ],
+    ) {
       return createTrack({
         meta: {
           source: 'openstreetmap',
@@ -420,13 +426,39 @@ describe('TrackView', () => {
             width: 6,
             oneway: 0,
             access: 'private',
-            points: [
-              { x: 0, z: 0 },
-              { x: 8, z: 0 },
-            ],
+            points: privatePoints,
           },
         ],
       });
+    }
+
+    const PUBLIC_STREET_CLEARANCE = 8 / 2 + Math.min(2.5, 8 * 0.3);
+
+    function footprintOf(plan: BarrierPlan): [number, number][] {
+      const hx = (plan.ux * plan.length) / 2;
+      const hz = (plan.uz * plan.length) / 2;
+      const dx = (plan.uz * 1.4) / 2;
+      const dz = (-plan.ux * 1.4) / 2;
+      return [
+        [plan.x + hx + dx, plan.z + hz + dz],
+        [plan.x + hx - dx, plan.z + hz - dz],
+        [plan.x - hx + dx, plan.z - hz + dz],
+        [plan.x - hx - dx, plan.z - hz - dz],
+      ];
+    }
+
+    function distanceToPolyline(points: { x: number; z: number }[], x: number, z: number): number {
+      let best = Infinity;
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i];
+        const b = points[i + 1];
+        const sx = b.x - a.x;
+        const sz = b.z - a.z;
+        const len2 = sx * sx + sz * sz;
+        const t = len2 < 1e-9 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * sx + (z - a.z) * sz) / len2));
+        best = Math.min(best, Math.hypot(x - (a.x + sx * t), z - (a.z + sz * t)));
+      }
+      return best;
     }
 
     it('places no barriers when no road is private', () => {
@@ -435,24 +467,51 @@ describe('TrackView', () => {
       expect(planBarriers(track)).toHaveLength(0);
     });
 
-    it('blocks both entrances of a private driveway', () => {
+    it('blocks both entrances of a private driveway, clear of the street it joins', () => {
       const plans = planBarriers(barrierTrack());
       expect(plans).toHaveLength(2);
-      expect(plans.some((p) => p.x > 5)).toBe(true);
-      expect(plans.some((p) => p.x < 5)).toBe(true);
-      expect(plans.every((p) => p.z === 0)).toBe(true);
+      for (const plan of plans) {
+        expect(plan.z).toBeCloseTo(0, 5);
+        for (const [x] of footprintOf(plan)) {
+          expect(Math.abs(x)).toBeGreaterThanOrEqual(PUBLIC_STREET_CLEARANCE);
+        }
+      }
+      expect(plans.some((p) => p.x > 30)).toBe(true);
     });
 
-    it('places a single barrier on a closed private loop', () => {
-      const track = barrierTrack();
-      const priv = track.roads.find((r) => r.access === 'private')!;
-      priv.points = [
+    it('skips a barrier when the private road is too short to clear the street', () => {
+      const plans = planBarriers(barrierTrack([{ x: 0, z: 0 }, { x: 5, z: 0 }]));
+      expect(plans).toHaveLength(0);
+    });
+
+    it('anchors a closed private loop at its entrance, on the loop itself', () => {
+      const loop = [
         { x: 0, z: 0 },
-        { x: 4, z: 4 },
-        { x: 8, z: 0 },
+        { x: 20, z: 20 },
+        { x: 40, z: 0 },
         { x: 0, z: 0 },
       ];
-      expect(planBarriers(track)).toHaveLength(1);
+      const plans = planBarriers(barrierTrack(loop));
+      expect(plans).toHaveLength(1);
+      expect(distanceToPolyline(loop, plans[0].x, plans[0].z)).toBeLessThan(0.01);
+      for (const [x] of footprintOf(plans[0])) {
+        expect(Math.abs(x)).toBeGreaterThanOrEqual(PUBLIC_STREET_CLEARANCE);
+      }
+    });
+
+    it('keeps the barrier on the private road when it bends right after the entrance', () => {
+      const bend = [
+        { x: 0, z: 200 },
+        { x: 1, z: 200 },
+        { x: 1, z: 230 },
+      ];
+      const plans = planBarriers(barrierTrack(bend));
+      expect(plans).toHaveLength(2);
+      for (const plan of plans) {
+        expect(distanceToPolyline(bend, plan.x, plan.z)).toBeLessThan(0.01);
+      }
+      const nearEntrance = plans.find((p) => p.z < 215)!;
+      expect(Math.abs(nearEntrance.ux)).toBeCloseTo(1, 5);
     });
 
     it('renders a barrier via planBarriers through TrackView without throwing', () => {
@@ -469,45 +528,47 @@ describe('TrackView', () => {
       const road = view.group.children.find((c) =>
         c.name.startsWith('roads-'),
       ) as THREE.Mesh;
-      const maskAttr = road.geometry.getAttribute('aMarkingMask') as THREE.BufferAttribute;
       const styleAttr = road.geometry.getAttribute('aMarkingStyle') as THREE.BufferAttribute;
       const acrossAttr = road.geometry.getAttribute('aMarkingAcross') as THREE.BufferAttribute;
       const widthAttr = road.geometry.getAttribute('aMarkingWidth') as THREE.BufferAttribute;
       const lanesAttr = road.geometry.getAttribute('aMarkingLanes') as THREE.BufferAttribute;
-      const sAttr = road.geometry.getAttribute('aMarkingS') as THREE.BufferAttribute;
-      const aAttr = road.geometry.getAttribute('aMarkingA') as THREE.BufferAttribute;
+      const prevSAttr = road.geometry.getAttribute('aMarkingPrevS') as THREE.BufferAttribute;
+      const prevAAttr = road.geometry.getAttribute('aMarkingPrevA') as THREE.BufferAttribute;
+      const nextSAttr = road.geometry.getAttribute('aMarkingNextS') as THREE.BufferAttribute;
+      const nextAAttr = road.geometry.getAttribute('aMarkingNextA') as THREE.BufferAttribute;
 
-      expect(maskAttr).toBeDefined();
       expect(styleAttr).toBeDefined();
       expect(acrossAttr).toBeDefined();
       expect(widthAttr).toBeDefined();
       expect(lanesAttr).toBeDefined();
-      expect(sAttr).toBeDefined();
-      expect(aAttr).toBeDefined();
-      expect(maskAttr.count).toBeGreaterThan(0);
-      expect(sAttr.count).toBe(maskAttr.count);
-      expect(aAttr.count).toBe(maskAttr.count);
+      expect(prevSAttr).toBeDefined();
+      expect(prevAAttr).toBeDefined();
+      expect(nextSAttr).toBeDefined();
+      expect(nextAAttr).toBeDefined();
+      expect(prevSAttr.count).toBeGreaterThan(0);
+      expect(prevSAttr.count).toBe(styleAttr.count);
+      expect(nextSAttr.count).toBe(styleAttr.count);
     });
 
-    it('sets the fragment-fade attributes next to a shared junction', () => {
-      const junctionRoads: OSMMapData['roads'] = [
+    it('brackets the straight block between two junctions and keeps it marked', () => {
+      const roads: OSMMapData['roads'] = [
         {
           id: 1,
-          type: 'residential',
-          name: 'N',
+          type: 'primary',
+          name: 'A',
           lanes: 2,
-          width: 8,
+          width: 12,
           oneway: 0,
           access: 'yes',
           points: [
             { x: 0, z: 0 },
-            { x: 0, z: -50 },
+            { x: 100, z: 0 },
           ],
         },
         {
           id: 2,
           type: 'residential',
-          name: 'S',
+          name: 'B',
           lanes: 2,
           width: 8,
           oneway: 0,
@@ -520,34 +581,232 @@ describe('TrackView', () => {
         {
           id: 3,
           type: 'residential',
-          name: 'E',
+          name: 'C',
           lanes: 2,
           width: 8,
           oneway: 0,
           access: 'yes',
           points: [
             { x: 0, z: 0 },
-            { x: 50, z: 0 },
+            { x: 0, z: 50 },
+          ],
+        },
+        {
+          id: 4,
+          type: 'residential',
+          name: 'D',
+          lanes: 2,
+          width: 8,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 100, z: 0 },
+            { x: 150, z: 0 },
+          ],
+        },
+        {
+          id: 5,
+          type: 'residential',
+          name: 'E',
+          lanes: 2,
+          width: 8,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 100, z: 0 },
+            { x: 100, z: -50 },
           ],
         },
       ];
-      const view = new TrackView(createTrack({ ...SAMPLE_DATA, roads: junctionRoads }));
+      const track = createTrack({
+        ...SAMPLE_DATA,
+        roads,
+      });
+      const view = new TrackView(track);
       const mesh = view.group.children.find((c) =>
-        c.name.startsWith('roads-'),
+        c.name === 'roads-major',
       ) as THREE.Mesh;
-      const sAttr = mesh.geometry.getAttribute('aMarkingS') as THREE.BufferAttribute;
-      const aAttr = mesh.geometry.getAttribute('aMarkingA') as THREE.BufferAttribute;
-      const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const prevS = mesh.geometry.getAttribute('aMarkingPrevS') as THREE.BufferAttribute;
+      const prevA = mesh.geometry.getAttribute('aMarkingPrevA') as THREE.BufferAttribute;
+      const nextS = mesh.geometry.getAttribute('aMarkingNextS') as THREE.BufferAttribute;
+      const nextA = mesh.geometry.getAttribute('aMarkingNextA') as THREE.BufferAttribute;
 
-      let sawNear = false;
-      let sawFar = false;
-      for (let i = 0; i < sAttr.count; i++) {
-        const d = Math.hypot(pos.getX(i), pos.getZ(i));
-        if (d < 6 && Math.abs(sAttr.getX(i)) < 1e-3) sawNear = true;
-        if (d > 40 && sAttr.getX(i) > 40) sawFar = true;
+      const { radius } = findJunctions(roads.map((r) => ({
+        name: r.name,
+        type: r.type,
+        lanes: r.lanes,
+        width: r.width,
+        oneway: r.oneway,
+        access: r.access,
+        points: r.points,
+      })))[0];
+      const allowance = radius + 2;
+
+      expect(prevS.count).toBeGreaterThan(0);
+      for (let i = 0; i < prevS.count; i++) {
+        expect(prevS.getX(i)).toBeCloseTo(0, 5);
+        expect(prevA.getX(i)).toBeCloseTo(allowance, 5);
+        expect(nextS.getX(i)).toBeCloseTo(100, 5);
+        expect(nextA.getX(i)).toBeCloseTo(allowance, 5);
       }
-      expect(sawNear).toBe(true);
-      expect(sawFar).toBe(true);
+
+      const mask = (dist: number): number => {
+        const fadeA =
+          (dist - 0 - allowance) / 3;
+        const fadeB =
+          (100 - dist - allowance) / 3;
+        return Math.min(
+          Math.min(1, Math.max(0, fadeA)),
+          Math.min(1, Math.max(0, fadeB)),
+        );
+      };
+      expect(mask(50)).toBe(1);
+      expect(mask(5)).toBe(0);
+      expect(mask(95)).toBe(0);
+    });
+
+    it('keeps a straight block marked when the junction sits far to the side', () => {
+      const roads: OSMMapData['roads'] = [
+        {
+          id: 1,
+          type: 'primary',
+          name: 'A',
+          lanes: 2,
+          width: 12,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 0, z: 0 },
+            { x: 0, z: 100 },
+          ],
+        },
+        {
+          id: 2,
+          type: 'residential',
+          name: 'B',
+          lanes: 2,
+          width: 8,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 70, z: 75 },
+            { x: 110, z: 75 },
+          ],
+        },
+        {
+          id: 3,
+          type: 'residential',
+          name: 'C',
+          lanes: 2,
+          width: 8,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 70, z: 75 },
+            { x: 70, z: 120 },
+          ],
+        },
+        {
+          id: 4,
+          type: 'residential',
+          name: 'D',
+          lanes: 2,
+          width: 8,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 30, z: 75 },
+            { x: 70, z: 75 },
+          ],
+        },
+      ];
+      const track = createTrack({
+        ...SAMPLE_DATA,
+        roads,
+      });
+      const view = new TrackView(track);
+      const mesh = view.group.children.find((c) =>
+        c.name === 'roads-major',
+      ) as THREE.Mesh;
+      const prevS = mesh.geometry.getAttribute('aMarkingPrevS') as THREE.BufferAttribute;
+      const prevA = mesh.geometry.getAttribute('aMarkingPrevA') as THREE.BufferAttribute;
+      const nextS = mesh.geometry.getAttribute('aMarkingNextS') as THREE.BufferAttribute;
+      const nextA = mesh.geometry.getAttribute('aMarkingNextA') as THREE.BufferAttribute;
+
+      expect(prevS.count).toBeGreaterThan(0);
+      for (let i = 0; i < prevS.count; i++) {
+        expect(prevS.getX(i)).toBeCloseTo(-1e6, 3);
+        expect(prevA.getX(i)).toBeCloseTo(-1e6, 3);
+        expect(nextS.getX(i)).toBeCloseTo(1e6, 3);
+        expect(nextA.getX(i)).toBeCloseTo(-1e6, 3);
+      }
+    });
+
+    it('fades markings under a junction that sits beside the middle of a segment', () => {
+      const side = (
+        id: number,
+        name: string,
+        to: { x: number; z: number },
+      ): OSMMapData['roads'][number] => ({
+        id,
+        type: 'residential',
+        name,
+        lanes: 2,
+        width: 8,
+        oneway: 0,
+        access: 'yes',
+        points: [{ x: 50, z: 9 }, to],
+      });
+      const roads: OSMMapData['roads'] = [
+        {
+          id: 1,
+          type: 'primary',
+          name: 'A',
+          lanes: 2,
+          width: 12,
+          oneway: 0,
+          access: 'yes',
+          points: [
+            { x: 0, z: 0 },
+            { x: 100, z: 0 },
+          ],
+        },
+        side(2, 'B', { x: 50, z: 60 }),
+        side(3, 'C', { x: 20, z: 40 }),
+        side(4, 'D', { x: 80, z: 40 }),
+      ];
+      const view = new TrackView(createTrack({ ...SAMPLE_DATA, roads }));
+      const mesh = view.group.children.find((c) =>
+        c.name === 'roads-major',
+      ) as THREE.Mesh;
+      const g = mesh.geometry;
+      const uv = g.getAttribute('uv');
+      const prevS = g.getAttribute('aMarkingPrevS');
+      const prevA = g.getAttribute('aMarkingPrevA');
+      const nextS = g.getAttribute('aMarkingNextS');
+      const nextA = g.getAttribute('aMarkingNextA');
+      const index = g.getIndex()!;
+      const fade = (x: number): number => Math.min(1, Math.max(0, x / 3));
+
+      const maskAt = (dist: number): number => {
+        let result = Infinity;
+        for (let i = 0; i < index.count; i += 3) {
+          const ids = [index.getX(i), index.getX(i + 1), index.getX(i + 2)];
+          const ds = ids.map((k) => uv.getY(k) / metresToUv(1));
+          if (dist < Math.min(...ds) || dist > Math.max(...ds)) continue;
+          const k = ids[0];
+          result = Math.min(
+            result,
+            fade(dist - prevS.getX(k) - prevA.getX(k)),
+            fade(nextS.getX(k) - dist - nextA.getX(k)),
+          );
+        }
+        return result;
+      };
+
+      expect(maskAt(50)).toBe(0);
+      expect(maskAt(15)).toBe(1);
+      expect(maskAt(85)).toBe(1);
     });
 
     it('puts the marking across coordinate at the lane edges', () => {
@@ -575,7 +834,7 @@ describe('TrackView', () => {
       expect(sawRight).toBe(true);
     });
 
-    it('sets mask to 0 near a shared junction and 1 away from it', () => {
+    it('fades to zero within the junction arc and back to full markings beyond it', () => {
       const junctionRoads: OSMMapData['roads'] = [
         {
           id: 1,
@@ -625,8 +884,10 @@ describe('TrackView', () => {
       const mesh = view.group.children.find((c) =>
         c.name.startsWith('roads-'),
       ) as THREE.Mesh;
-      const maskAttr = mesh.geometry.getAttribute('aMarkingMask') as THREE.BufferAttribute;
-      const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const prevS = mesh.geometry.getAttribute('aMarkingPrevS') as THREE.BufferAttribute;
+      const prevA = mesh.geometry.getAttribute('aMarkingPrevA') as THREE.BufferAttribute;
+      const nextS = mesh.geometry.getAttribute('aMarkingNextS') as THREE.BufferAttribute;
+      const nextA = mesh.geometry.getAttribute('aMarkingNextA') as THREE.BufferAttribute;
 
       const { radius } = findJunctions(junctionRoads.map((r) => ({
         name: r.name,
@@ -637,19 +898,28 @@ describe('TrackView', () => {
         access: r.access,
         points: r.points,
       })))[0];
-      let nearZero = false;
-      let nearOne = false;
-      for (let i = 0; i < maskAttr.count; i++) {
-        const d = Math.hypot(pos.getX(i), pos.getZ(i));
-        if (d <= radius + 2) {
-          if (maskAttr.getX(i) < 1e-4) nearZero = true;
-        }
-        if (d >= radius + 5) {
-          if (Math.abs(maskAttr.getX(i) - 1) < 1e-4) nearOne = true;
-        }
+      const allowance = radius + 2;
+
+      const mask = (prev: number, next: number, dist: number): number => {
+        const fadeA = (dist - prev - allowance) / 3;
+        const fadeB = (next - dist - allowance) / 3;
+        return Math.min(
+          Math.min(1, Math.max(0, fadeA)),
+          Math.min(1, Math.max(0, fadeB)),
+        );
+      };
+
+      let sawNearZero = false;
+      let sawFull = false;
+      for (let i = 0; i < prevS.count; i++) {
+        const p = prevS.getX(i);
+        const n = nextS.getX(i);
+        const hasJunctionAtStart = p > -1e5 && n >= 1e6;
+        if (hasJunctionAtStart && mask(p, n, p + 0.1) < 1e-4) sawNearZero = true;
+        if (hasJunctionAtStart && mask(p, n, p + 40) > 1 - 1e-4) sawFull = true;
       }
-      expect(nearZero).toBe(true);
-      expect(nearOne).toBe(true);
+      expect(sawNearZero).toBe(true);
+      expect(sawFull).toBe(true);
     });
   });
 

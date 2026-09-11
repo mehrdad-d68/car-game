@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import {
-  alongRoadDistance,
   findJunctions,
   Junction,
   JunctionGrid,
   markingPattern,
   PolylineRoad,
+  projectOntoRoad,
   RoadClass,
   roadClass,
   TrackData,
@@ -338,10 +338,15 @@ export function directionArrowRotationY(phi: number): number {
 export function filterArrowsByJunctions(
   plans: DirectionArrowPlan[],
   junctions: Junction[],
+  grid: JunctionGrid = new JunctionGrid(junctions),
 ): DirectionArrowPlan[] {
   if (junctions.length === 0) return plans;
+  let maxRadius = 0;
+  for (const j of junctions) {
+    if (j.radius > maxRadius) maxRadius = j.radius;
+  }
   return plans.filter((p) => {
-    for (const j of junctions) {
+    for (const j of grid.near(p.x, p.z, maxRadius)) {
       if (Math.hypot(p.x - j.position.x, p.z - j.position.z) <= j.radius) {
         return false;
       }
@@ -421,6 +426,10 @@ export interface BarrierPlan {
 
 const BARRIER_SCALE = 1.3;
 const BARRIER_RETREAT = 1.6;
+const BARRIER_STEP = 0.25;
+const BARRIER_MAX_RETREAT = 25;
+const BARRIER_MARGIN = 0.2;
+const BARRIER_SEARCH_PAD = 20;
 
 function roadAccess(road: PolylineRoad): string {
   return (road.access ?? '').trim().toLowerCase();
@@ -430,71 +439,141 @@ function isPrivateRoad(road: PolylineRoad): boolean {
   return roadAccess(road) === 'private';
 }
 
-function entranceTangent(
-  points: Vec2[],
-  end: 'start' | 'end',
-): { tangent: number; inwardX: number; inwardZ: number } {
-  let nx: number;
-  let nz: number;
-
-  if (end === 'start') {
-    nx = points[1].x - points[0].x;
-    nz = points[1].z - points[0].z;
-  } else {
-    const idx = points.length - 1;
-    nx = points[idx].x - points[idx - 1].x;
-    nz = points[idx].z - points[idx - 1].z;
-  }
-
-  const len = Math.hypot(nx, nz) || 1;
-  const tangent = Math.atan2(nz, nx);
-  const inwardX = end === 'start' ? nx / len : -nx / len;
-  const inwardZ = end === 'start' ? nz / len : -nz / len;
-
-  return { tangent, inwardX, inwardZ };
+function nodeKey(p: Vec2): string {
+  return `${Math.round(p.x * 4)},${Math.round(p.z * 4)}`;
 }
 
-function midpoint(points: Vec2[]): Vec2 {
-  let x = 0;
-  let z = 0;
-  for (const p of points) {
-    x += p.x;
-    z += p.z;
+function directionAtDistance(points: Vec2[], dists: number[], s: number): Vec2 {
+  let fallback: Vec2 = { x: 1, z: 0 };
+  for (let i = 0; i < points.length - 1; i++) {
+    const dir = unitVector(points[i + 1].x - points[i].x, points[i + 1].z - points[i].z);
+    if (!dir) continue;
+    fallback = dir;
+    if (s <= dists[i + 1]) return dir;
   }
-  return { x: x / points.length, z: z / points.length };
+  return fallback;
+}
+
+function distanceToPolyline(points: Vec2[], x: number, z: number): number {
+  let best = Infinity;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const sx = b.x - a.x;
+    const sz = b.z - a.z;
+    const lenSq = sx * sx + sz * sz;
+    const t = lenSq < 1e-12 ? 0 : Math.max(0, Math.min(1, ((x - a.x) * sx + (z - a.z) * sz) / lenSq));
+    const d = Math.hypot(x - (a.x + sx * t), z - (a.z + sz * t));
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+function barrierFootprint(centre: Vec2, ux: number, uz: number, length: number): Vec2[] {
+  const hx = (ux * length) / 2;
+  const hz = (uz * length) / 2;
+  const dx = (uz * BARRIER_DEPTH) / 2;
+  const dz = (-ux * BARRIER_DEPTH) / 2;
+  const points: Vec2[] = [centre];
+  for (const along of [-1, 0, 1]) {
+    for (const across of [-1, 1]) {
+      points.push({
+        x: centre.x + along * hx + across * dx,
+        z: centre.z + along * hz + across * dz,
+      });
+    }
+  }
+  return points;
+}
+
+function blockedByOtherRoad(
+  footprint: Vec2[],
+  owner: number,
+  roads: PolylineRoad[],
+  grid: RoadGrid,
+  reach: number,
+): boolean {
+  const centre = footprint[0];
+  for (const id of grid.near(centre.x, centre.z, reach)) {
+    if (id === owner) continue;
+    const other = roads[id];
+    const clearance = other.width / 2 + edgeWalkWidth(other) + BARRIER_MARGIN;
+    for (const p of footprint) {
+      if (distanceToPolyline(other.points, p.x, p.z) < clearance) return true;
+    }
+  }
+  return false;
+}
+
+function placeBarrier(
+  points: Vec2[],
+  owner: number,
+  length: number,
+  roads: PolylineRoad[],
+  grid: RoadGrid,
+): BarrierPlan | null {
+  const dists = cumulativeDistances(points);
+  const furthest = Math.min(dists[dists.length - 1] - BARRIER_DEPTH / 2, BARRIER_MAX_RETREAT);
+  for (let s = BARRIER_RETREAT; s <= furthest; s += BARRIER_STEP) {
+    const centre = pointAtDistance(points, dists, s);
+    const dir = directionAtDistance(points, dists, s);
+    const ux = -dir.z;
+    const uz = dir.x;
+    const footprint = barrierFootprint(centre, ux, uz, length);
+    if (!blockedByOtherRoad(footprint, owner, roads, grid, length / 2 + BARRIER_SEARCH_PAD)) {
+      return { x: centre.x, z: centre.z, ux, uz, length };
+    }
+  }
+  return null;
+}
+
+function loopEntrance(points: Vec2[], nodeRoads: Map<string, Set<number>>): number {
+  for (let i = 0; i < points.length - 1; i++) {
+    if ((nodeRoads.get(nodeKey(points[i]))?.size ?? 0) > 1) return i;
+  }
+  return 0;
 }
 
 export function planBarriers(track: TrackData): BarrierPlan[] {
   const plans: BarrierPlan[] = [];
+  const roads = track.roads;
+  const grid = new RoadGrid(roads);
+  const nodeRoads = new Map<string, Set<number>>();
+  roads.forEach((road, index) => {
+    for (const p of road.points) {
+      const key = nodeKey(p);
+      const set = nodeRoads.get(key);
+      if (set) {
+        set.add(index);
+      } else {
+        nodeRoads.set(key, new Set([index]));
+      }
+    }
+  });
 
-  for (const road of track.roads) {
-    if (!isPrivateRoad(road)) continue;
+  roads.forEach((road, owner) => {
+    if (!isPrivateRoad(road)) return;
     const pts = road.points;
-    if (pts.length < 2) continue;
+    if (pts.length < 2) return;
 
     const first = pts[0];
     const last = pts[pts.length - 1];
     const closed = Math.hypot(last.x - first.x, last.z - first.z) < 1e-6;
-
     const length = road.width * BARRIER_SCALE;
-    const ends: ('start' | 'end')[] = closed ? ['start'] : ['start', 'end'];
-    const anyPoint = closed ? midpoint(pts) : first;
 
-    for (const end of ends) {
-      const { tangent, inwardX, inwardZ } = entranceTangent(pts, end);
-      const origin = end === 'start' ? anyPoint : last;
-      const cx = origin.x + inwardX * BARRIER_RETREAT;
-      const cz = origin.z + inwardZ * BARRIER_RETREAT;
-
-      plans.push({
-        x: cx,
-        z: cz,
-        ux: -Math.sin(tangent),
-        uz: Math.cos(tangent),
-        length,
-      });
+    const approaches: Vec2[][] = [];
+    if (closed) {
+      const entry = loopEntrance(pts, nodeRoads);
+      approaches.push([...pts.slice(entry, pts.length - 1), ...pts.slice(0, entry + 1)]);
+    } else {
+      approaches.push(pts, [...pts].reverse());
     }
-  }
+
+    for (const approach of approaches) {
+      const plan = placeBarrier(approach, owner, length, roads, grid);
+      if (plan) plans.push(plan);
+    }
+  });
 
   return plans;
 }
@@ -533,6 +612,10 @@ interface NodeVisit {
 function unitVector(dx: number, dz: number): Vec2 | null {
   const len = Math.hypot(dx, dz);
   return len < 1e-6 ? null : { x: dx / len, z: dz / len };
+}
+
+function lerpVec(a: Vec2, b: Vec2, t: number): Vec2 {
+  return { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t };
 }
 
 function visitAt(
@@ -581,7 +664,7 @@ export function planSidewalkCuts(roads: PolylineRoad[]): Map<PolylineRoad, Sidew
     for (let i = 0; i < points.length; i++) {
       const visit = visitAt(roadIndex, points, dists, i);
       if (!visit) continue;
-      const key = `${Math.round(points[i].x * 4)},${Math.round(points[i].z * 4)}`;
+      const key = nodeKey(points[i]);
       const visits = nodes.get(key);
       if (visits) {
         visits.push(visit);
@@ -1087,6 +1170,7 @@ export class TrackView {
     const plans = filterArrowsByJunctions(
       planDirectionArrows(this.track),
       this.junctions,
+      this.junctionGrid,
     );
     for (const plan of plans) {
       const mesh = makeArrowMesh();
@@ -1112,14 +1196,15 @@ export class TrackView {
   }
 
   private buildBarriers(): void {
+    const geometry = this.own(
+      new THREE.BoxGeometry(1, BARRIER_HEIGHT, BARRIER_DEPTH),
+    );
+    const material = this.own(
+      new THREE.MeshLambertMaterial({ color: BARRIER_COLOR }),
+    );
     for (const plan of planBarriers(this.track)) {
-      const geometry = this.own(
-        new THREE.BoxGeometry(plan.length, BARRIER_HEIGHT, BARRIER_DEPTH),
-      );
-      const material = this.own(
-        new THREE.MeshLambertMaterial({ color: BARRIER_COLOR }),
-      );
       const mesh = new THREE.Mesh(geometry, material);
+      mesh.scale.x = plan.length;
       mesh.position.set(plan.x, BARRIER_HEIGHT / 2, plan.z);
       mesh.rotation.y = barrierRotationY(plan.ux, plan.uz);
       mesh.visible = false;
@@ -1260,13 +1345,14 @@ export class TrackView {
     const positions: number[] = [];
     const uvs: number[] = [];
     const indices: number[] = [];
-    const markingMasks: number[] = [];
     const markingStyles: number[] = [];
     const markingAcross: number[] = [];
     const markingWidths: number[] = [];
     const markingLanes: number[] = [];
-    const markingS: number[] = [];
-    const markingA: number[] = [];
+    const markingPrevS: number[] = [];
+    const markingPrevA: number[] = [];
+    const markingNextS: number[] = [];
+    const markingNextA: number[] = [];
     const kerbPositions: number[] = [];
     const kerbIndices: number[] = [];
     const sidewalkPositions: number[] = [];
@@ -1279,13 +1365,14 @@ export class TrackView {
         positions,
         uvs,
         indices,
-        markingMasks,
         markingStyles,
         markingAcross,
         markingWidths,
         markingLanes,
-        markingS,
-        markingA,
+        markingPrevS,
+        markingPrevA,
+        markingNextS,
+        markingNextA,
         kerbPositions,
         kerbIndices,
         sidewalkPositions,
@@ -1304,10 +1391,6 @@ export class TrackView {
       new THREE.Float32BufferAttribute(uvs, 2),
     );
     geometry.setAttribute(
-      'aMarkingMask',
-      new THREE.Float32BufferAttribute(markingMasks, 1),
-    );
-    geometry.setAttribute(
       'aMarkingStyle',
       new THREE.Float32BufferAttribute(markingStyles, 1),
     );
@@ -1324,12 +1407,20 @@ export class TrackView {
       new THREE.Float32BufferAttribute(markingLanes, 1),
     );
     geometry.setAttribute(
-      'aMarkingS',
-      new THREE.Float32BufferAttribute(markingS, 1),
+      'aMarkingPrevS',
+      new THREE.Float32BufferAttribute(markingPrevS, 1),
     );
     geometry.setAttribute(
-      'aMarkingA',
-      new THREE.Float32BufferAttribute(markingA, 1),
+      'aMarkingPrevA',
+      new THREE.Float32BufferAttribute(markingPrevA, 1),
+    );
+    geometry.setAttribute(
+      'aMarkingNextS',
+      new THREE.Float32BufferAttribute(markingNextS, 1),
+    );
+    geometry.setAttribute(
+      'aMarkingNextA',
+      new THREE.Float32BufferAttribute(markingNextA, 1),
     );
     const vertexCount = positions.length / 3;
     const normals = new Float32Array(vertexCount * 3);
@@ -1351,13 +1442,14 @@ export class TrackView {
     positions: number[],
     uvs: number[],
     indices: number[],
-    markingMasks: number[],
     markingStyles: number[],
     markingAcross: number[],
     markingWidths: number[],
     markingLanes: number[],
-    markingS: number[],
-    markingA: number[],
+    markingPrevS: number[],
+    markingPrevA: number[],
+    markingNextS: number[],
+    markingNextA: number[],
     kerbPositions: number[],
     kerbIndices: number[],
     sidewalkPositions: number[],
@@ -1392,63 +1484,78 @@ export class TrackView {
       minZ - this.nearMargin,
       maxZ + this.nearMargin,
     );
-    const fade = fadeJunctions.map((j) => ({
-      s: alongRoadDistance(points, j.position),
-      allowance: j.radius + 2,
-    }));
-
-    const vertexOffset = positions.length / 3;
-    for (let i = 0; i < edge.left.length; i++) {
-      positions.push(edge.left[i].x, ROAD_HEIGHT, edge.left[i].z);
-      positions.push(edge.right[i].x, ROAD_HEIGHT, edge.right[i].z);
-
-      uvs.push(metresToUv(-hw), metresToUv(dists[i]));
-      uvs.push(metresToUv(hw), metresToUv(dists[i]));
-
-      const pos = points[i];
-      let mask = 1;
-      for (const j of fadeJunctions) {
-        const d = Math.hypot(pos.x - j.position.x, pos.z - j.position.z);
-        const start = j.radius + 2;
-        const end = start + 3;
-        const v = d <= start ? 0 : d >= end ? 1 : (d - start) / (end - start);
-        if (v < mask) mask = v;
+    const total = dists[dists.length - 1];
+    const fades: { s: number; allowance: number }[] = [];
+    for (const j of fadeJunctions) {
+      const { along, lateral } = projectOntoRoad(points, j.position);
+      const allowance = j.radius + 2;
+      if (
+        along >= -allowance &&
+        along <= total + allowance &&
+        lateral <= hw + j.radius
+      ) {
+        fades.push({ s: along, allowance });
       }
-      markingMasks.push(mask, mask);
-
-      let bestS = 0;
-      let bestA = -1e6;
-      let bestVal = Infinity;
-      for (let k = 0; k < fade.length; k++) {
-        const dAdj = Math.abs(dists[i] - fade[k].s);
-        const val = Math.min(1, Math.max(0, (dAdj - fade[k].allowance) / 3));
-        if (val < bestVal) {
-          bestVal = val;
-          bestS = fade[k].s;
-          bestA = fade[k].allowance;
-        }
-      }
-      markingS.push(bestS, bestS);
-      markingA.push(bestA, bestA);
-
-      markingStyles.push(style, style);
-      markingAcross.push(-hw, hw);
-      markingWidths.push(width, width);
-      markingLanes.push(lanes, lanes);
     }
+    fades.sort((a, b) => a.s - b.s);
 
+    const farPrev = { s: -1e6, allowance: -1e6 };
+    const farNext = { s: 1e6, allowance: -1e6 };
+
+    let fidx = 0;
     for (let i = 0; i < edge.left.length - 1; i++) {
-      const a = vertexOffset + i * 2;
-      const b = vertexOffset + i * 2 + 1;
-      const c = vertexOffset + (i + 1) * 2;
-      const d = vertexOffset + (i + 1) * 2 + 1;
+      while (fidx < fades.length && fades[fidx].s <= dists[i]) fidx++;
+      let nidx = fidx;
+      while (nidx < fades.length && fades[nidx].s < dists[i + 1]) nidx++;
 
-      indices.push(a, c, b);
-      indices.push(b, c, d);
+      // Junctions that project inside this segment split it, so every piece
+      // fades towards the junctions directly before and after it.
+      const breaks = [dists[i], ...fades.slice(fidx, nidx).map((f) => f.s), dists[i + 1]];
+      const segLen = dists[i + 1] - dists[i];
+      for (let k = 0; k < breaks.length - 1; k++) {
+        const s0 = breaks[k];
+        const s1 = breaks[k + 1];
+        if (s1 - s0 < 1e-6 && breaks.length > 2) continue;
+        const prev = fidx + k > 0 ? fades[fidx + k - 1] : farPrev;
+        const next = fidx + k < fades.length ? fades[fidx + k] : farNext;
+        const t0 = segLen > 0 ? (s0 - dists[i]) / segLen : 0;
+        const t1 = segLen > 0 ? (s1 - dists[i]) / segLen : 1;
+        const l0 = lerpVec(edge.left[i], edge.left[i + 1], t0);
+        const r0 = lerpVec(edge.right[i], edge.right[i + 1], t0);
+        const l1 = lerpVec(edge.left[i], edge.left[i + 1], t1);
+        const r1 = lerpVec(edge.right[i], edge.right[i + 1], t1);
+
+        const base = positions.length / 3;
+        positions.push(
+          l0.x, ROAD_HEIGHT, l0.z,
+          r0.x, ROAD_HEIGHT, r0.z,
+          l1.x, ROAD_HEIGHT, l1.z,
+          r1.x, ROAD_HEIGHT, r1.z,
+        );
+
+        uvs.push(
+          metresToUv(-hw), metresToUv(s0),
+          metresToUv(hw), metresToUv(s0),
+          metresToUv(-hw), metresToUv(s1),
+          metresToUv(hw), metresToUv(s1),
+        );
+
+        markingPrevS.push(prev.s, prev.s, prev.s, prev.s);
+        markingPrevA.push(prev.allowance, prev.allowance, prev.allowance, prev.allowance);
+        markingNextS.push(next.s, next.s, next.s, next.s);
+        markingNextA.push(next.allowance, next.allowance, next.allowance, next.allowance);
+        markingStyles.push(style, style, style, style);
+        markingAcross.push(-hw, hw, -hw, hw);
+        markingWidths.push(width, width, width, width);
+        markingLanes.push(lanes, lanes, lanes, lanes);
+
+        indices.push(base, base + 2, base + 1);
+        indices.push(base + 1, base + 2, base + 3);
+      }
     }
 
     const cuts = this.sidewalkCuts.get(road) ?? [];
-    const length = dists[dists.length - 1];
+    const length = total;
     const walk = cls === 'service' || cls === 'shared' ? 0 : sidewalkWidth(width);
 
     for (const side of SIDES) {

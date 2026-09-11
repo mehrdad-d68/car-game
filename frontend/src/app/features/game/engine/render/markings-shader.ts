@@ -20,40 +20,44 @@ export function markingStyleValue(pattern: MarkingPattern): number {
 }
 
 const VERTEX_DECLARATIONS = /* glsl */ `
-attribute float aMarkingMask;
 attribute float aMarkingStyle;
 attribute float aMarkingAcross;
 attribute float aMarkingWidth;
 attribute float aMarkingLanes;
-attribute float aMarkingS;
-attribute float aMarkingA;
-varying float vMarkingMask;
+attribute float aMarkingPrevS;
+attribute float aMarkingPrevA;
+attribute float aMarkingNextS;
+attribute float aMarkingNextA;
 varying float vMarkingStyle;
 varying float vMarkingAcross;
 varying float vMarkingWidth;
 varying float vMarkingLanes;
-varying float vMarkingS;
-varying float vMarkingA;
+varying float vMarkingPrevS;
+varying float vMarkingPrevA;
+varying float vMarkingNextS;
+varying float vMarkingNextA;
 `;
 
 const VERTEX_ASSIGNMENTS = /* glsl */ `
-	vMarkingMask = aMarkingMask;
 	vMarkingStyle = aMarkingStyle;
 	vMarkingAcross = aMarkingAcross;
 	vMarkingWidth = aMarkingWidth;
 	vMarkingLanes = aMarkingLanes;
-	vMarkingS = aMarkingS;
-	vMarkingA = aMarkingA;
+	vMarkingPrevS = aMarkingPrevS;
+	vMarkingPrevA = aMarkingPrevA;
+	vMarkingNextS = aMarkingNextS;
+	vMarkingNextA = aMarkingNextA;
 `;
 
 const FRAGMENT_DECLARATIONS = /* glsl */ `
-varying float vMarkingMask;
 varying float vMarkingStyle;
 varying float vMarkingAcross;
 varying float vMarkingWidth;
 varying float vMarkingLanes;
-varying float vMarkingS;
-varying float vMarkingA;
+varying float vMarkingPrevS;
+varying float vMarkingPrevA;
+varying float vMarkingNextS;
+varying float vMarkingNextA;
 
 float markingAA(float edge, float x) {
 	return smoothstep(edge, edge + fwidth(x), x);
@@ -78,7 +82,10 @@ float markingAllowance(float distToCenter, float allowance) {
 const FRAGMENT_BLOCK = /* glsl */ `
 	{
 		float dist = vMapUv.y * 4.0;
-		float mask = markingAllowance(abs(dist - vMarkingS), vMarkingA);
+		float mask = min(
+			markingAllowance(dist - vMarkingPrevS, vMarkingPrevA),
+			markingAllowance(vMarkingNextS - dist, vMarkingNextA)
+		);
 		if (mask > 0.01 && vMarkingStyle > 0.5) {
 			float across = vMarkingAcross;
 			float w = vMarkingWidth;
@@ -92,14 +99,15 @@ const FRAGMENT_BLOCK = /* glsl */ `
 			if (vMarkingStyle < 1.5) {
 				mark = max(mark, markingSolid(across, 0.0) * markingDash(dist));
 			} else if (vMarkingStyle < 2.5) {
-				mark = max(mark, markingSolid(across, -0.25));
-				mark = max(mark, markingSolid(across, 0.25));
 				float cw = vMarkingWidth / lanes;
+				float centerLine = mod(lanes, 2.0) > 0.5 ? -0.5 * cw : 0.0;
+				mark = max(mark, markingSolid(across, centerLine - 0.25));
+				mark = max(mark, markingSolid(across, centerLine + 0.25));
 				for (int j = 0; j < 6; j++) {
 					float fj = float(j);
 					if (fj <= lanes - 2.0) {
 						float center = (fj - (lanes - 1.0) / 2.0) * cw + cw / 2.0;
-						if (abs(center) > cw * 0.9) {
+						if (abs(center - centerLine) > 0.4 * cw) {
 							mark = max(mark, markingSolid(across, center) * markingDash(dist));
 						}
 					}
@@ -134,5 +142,5 @@ export function applyMarkingsShader(material: THREE.MeshLambertMaterial): void {
       '#include <map_fragment>\n' + FRAGMENT_BLOCK,
     );
   };
-  material.customProgramCacheKey = () => 'road-markings-v2';
+  material.customProgramCacheKey = () => 'road-markings-v3';
 }

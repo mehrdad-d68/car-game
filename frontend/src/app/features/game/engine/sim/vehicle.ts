@@ -53,3 +53,18 @@ export function stepVehicle(
     speed,
   };
 }
+
+export function interpolateCarState(
+  previous: CarState,
+  current: CarState,
+  alpha: number,
+): CarState {
+  return {
+    position: {
+      x: previous.position.x + (current.position.x - previous.position.x) * alpha,
+      z: previous.position.z + (current.position.z - previous.position.z) * alpha,
+    },
+    heading: previous.heading + (current.heading - previous.heading) * alpha,
+    speed: previous.speed + (current.speed - previous.speed) * alpha,
+  };
+}

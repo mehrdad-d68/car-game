@@ -1,13 +1,11 @@
 import { OSMMapData } from './osm-types';
 import {
-  alongRoadDistance,
   createTrack,
   findJunctions,
-  Junction,
   JunctionGrid,
-  markingMaskFactor,
   markingPattern,
   PolylineRoad,
+  projectOntoRoad,
   roadClass,
 } from './track';
 
@@ -567,58 +565,32 @@ describe('createTrack', () => {
     });
   });
 
-  describe('alongRoadDistance', () => {
+  describe('projectOntoRoad', () => {
     const pts = [
       { x: 0, z: 0 },
       { x: 30, z: 0 },
       { x: 30, z: 40 },
     ];
 
-    it('is 0 at the start of the road', () => {
-      expect(alongRoadDistance(pts, { x: 0, z: 0 })).toBe(0);
+    it('is along 0 at the start of the road', () => {
+      expect(projectOntoRoad(pts, { x: 0, z: 0 }).along).toBe(0);
     });
 
     it('measures distance along the polyline', () => {
-      expect(alongRoadDistance(pts, { x: 30, z: 40 })).toBeCloseTo(70, 6);
-      expect(alongRoadDistance(pts, { x: 15, z: 0 })).toBeCloseTo(15, 6);
+      expect(projectOntoRoad(pts, { x: 30, z: 40 }).along).toBeCloseTo(70, 6);
+      expect(projectOntoRoad(pts, { x: 15, z: 0 }).along).toBeCloseTo(15, 6);
     });
 
     it('projects a point beside a segment onto it', () => {
-      expect(alongRoadDistance(pts, { x: 5, z: 20 })).toBeCloseTo(5, 6);
-    });
-  });
-
-  describe('markingMaskFactor', () => {
-    const junction: Junction = { position: { x: 0, z: 0 }, roadCount: 4, radius: 6 };
-
-    it('is 0 exactly at the centre of a junction', () => {
-      expect(markingMaskFactor({ x: 0, z: 0 }, [junction])).toBe(0);
+      const { along, lateral } = projectOntoRoad(pts, { x: 5, z: 20 });
+      expect(along).toBeCloseTo(5, 6);
+      expect(lateral).toBeCloseTo(20, 6);
     });
 
-    it('is 1 far from any junction', () => {
-      expect(markingMaskFactor({ x: 1000, z: 1000 }, [junction])).toBe(1);
-    });
-
-    it('is monotonic between the fade start and end', () => {
-      const start = junction.radius + 2;
-      const end = start + 3;
-      const atStart = markingMaskFactor({ x: start, z: 0 }, [junction]);
-      const mid = markingMaskFactor({ x: (start + end) / 2, z: 0 }, [junction]);
-      const atEnd = markingMaskFactor({ x: end, z: 0 }, [junction]);
-      expect(atStart).toBe(0);
-      expect(mid).toBeGreaterThan(0);
-      expect(mid).toBeLessThan(1);
-      expect(atEnd).toBe(1);
-      expect(mid).toBeGreaterThan(atStart);
-      expect(atEnd).toBeGreaterThan(mid);
-    });
-
-    it('takes the minimum across multiple junctions', () => {
-      const near = markingMaskFactor({ x: 100, z: 0 }, [
-        junction,
-        { position: { x: 100, z: 0 }, roadCount: 3, radius: 8 },
-      ]);
-      expect(near).toBe(0);
+    it('reports zero lateral distance for a point on the centreline', () => {
+      const { along, lateral } = projectOntoRoad(pts, { x: 30, z: 20 });
+      expect(along).toBeCloseTo(50, 6);
+      expect(lateral).toBeCloseTo(0, 6);
     });
   });
 

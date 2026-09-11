@@ -40,28 +40,13 @@ export function markingPattern(road: PolylineRoad): MarkingPattern {
   return 'two-way-dashed';
 }
 
-export function markingMaskFactor(
+export function projectOntoRoad(
+  points: Vec2[],
   position: Vec2,
-  junctions: Junction[],
-): number {
-  let min = 1;
-  for (const j of junctions) {
-    const d = Math.hypot(
-      position.x - j.position.x,
-      position.z - j.position.z,
-    );
-    const start = j.radius + 2;
-    const end = start + 3;
-    const v = d <= start ? 0 : d >= end ? 1 : (d - start) / (end - start);
-    if (v < min) min = v;
-  }
-  return min;
-}
-
-export function alongRoadDistance(points: Vec2[], position: Vec2): number {
+): { along: number; lateral: number } {
   let running = 0;
-  let best = Infinity;
-  let bestDistance = 0;
+  let bestAlong = 0;
+  let bestLateral = Infinity;
 
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i];
@@ -80,15 +65,15 @@ export function alongRoadDistance(points: Vec2[], position: Vec2): number {
 
     const projX = a.x + dx * t;
     const projZ = a.z + dz * t;
-    const d = Math.hypot(position.x - projX, position.z - projZ);
-    if (d < best) {
-      best = d;
-      bestDistance = running + segLen * t;
+    const lateral = Math.hypot(position.x - projX, position.z - projZ);
+    if (lateral < bestLateral) {
+      bestLateral = lateral;
+      bestAlong = running + segLen * t;
     }
     running += segLen;
   }
 
-  return bestDistance;
+  return { along: bestAlong, lateral: bestLateral };
 }
 
 export interface TrackBounds {
