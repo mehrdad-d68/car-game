@@ -46,21 +46,19 @@ const APPEARANCE: CarAppearance = {
 };
 
 describe('CarView', () => {
-  it('interpolates position between the previous and current simulation states', () => {
+  it('places the car at the drawn position it is given', () => {
     const view = new CarView(APPEARANCE);
-    const current: CarState = { ...AT_REST, position: { x: 10, z: 20 } };
 
-    view.sync(AT_REST, current, 0.5);
+    view.sync({ ...AT_REST, position: { x: 5, z: 10 } });
 
     expect(view.group.position.x).toBeCloseTo(5);
     expect(view.group.position.z).toBeCloseTo(10);
   });
 
-  it('interpolates heading between the previous and current simulation states', () => {
+  it('turns the car to the drawn heading it is given', () => {
     const view = new CarView(APPEARANCE);
-    const current: CarState = { ...AT_REST, heading: 1 };
 
-    view.sync(AT_REST, current, 0.25);
+    view.sync({ ...AT_REST, heading: 0.25 });
 
     expect(view.group.rotation.y).toBeCloseTo(0.25);
   });

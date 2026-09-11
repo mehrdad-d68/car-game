@@ -10,6 +10,7 @@ import {
   planTrafficLightApproaches,
 } from './feature-view';
 import { PROP_SPECS } from './prop-specs.fixture';
+import { SURFACE_OFFSET } from './constants';
 
 const SAMPLE_DATA: OSMMapData = {
   meta: {
@@ -353,6 +354,22 @@ describe('FeatureView', () => {
     const stripes = view.pools.find((pool) => pool.name === 'stripe')!;
     expect(stripes.kind).toBe('pedestrianCrossing');
     expect(stripes.capacity).toBe(crossingStripeCount(12));
+  });
+
+  it('draws crossing stripes as a road decal that wins over every road surface', () => {
+    const stripes = view.pools.find((pool) => pool.kind === 'pedestrianCrossing')!;
+    const material = stripes.mesh.material as THREE.Material;
+    expect(material.polygonOffset).toBe(true);
+    expect(material.polygonOffsetFactor).toBe(SURFACE_OFFSET.decal);
+    expect(material.polygonOffsetUnits).toBe(SURFACE_OFFSET.decal);
+
+    const { decal, ...surfaces } = SURFACE_OFFSET;
+    for (const offset of Object.values(surfaces)) {
+      expect(decal).toBeLessThan(offset);
+    }
+
+    const signalPole = view.pools.find((pool) => pool.kind === 'trafficLight' && pool.name === 'pole')!;
+    expect((signalPole.mesh.material as THREE.Material).polygonOffset).toBe(false);
   });
 
   it('shares one lamp pool per signal colour', () => {

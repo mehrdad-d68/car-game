@@ -1,5 +1,13 @@
 import { OSMMapData } from './osm-types';
-import { createTrack } from './track';
+import {
+  createTrack,
+  findJunctions,
+  JunctionGrid,
+  markingPattern,
+  PolylineRoad,
+  projectOntoRoad,
+  roadClass,
+} from './track';
 
 const SAMPLE_DATA: OSMMapData = {
   meta: {
@@ -307,5 +315,330 @@ describe('createTrack', () => {
     expect(stop.width).toBe(22);
     expect(stop.depth).toBe(4);
     expect(track.features.gasStations[1].width).toBeUndefined();
+  });
+
+  it('carries type and lanes through createTrack', () => {
+    const track = createTrack(SAMPLE_DATA);
+    const roadA = track.roads.find((r) => r.name === 'Road A');
+    expect(roadA).toBeDefined();
+    expect(roadA!.type).toBe('primary');
+    expect(roadA!.lanes).toBe(2);
+    const roadB = track.roads.find((r) => r.name === 'Road B');
+    expect(roadB).toBeDefined();
+    expect(roadB!.type).toBe('residential');
+    expect(roadB!.lanes).toBe(1);
+  });
+
+  describe('roadClass', () => {
+    it('classifies motorway as major', () => {
+      expect(roadClass('motorway')).toBe('major');
+    });
+
+    it('classifies primary as major', () => {
+      expect(roadClass('primary')).toBe('major');
+    });
+
+    it('classifies secondary as major', () => {
+      expect(roadClass('secondary')).toBe('major');
+    });
+
+    it('classifies tertiary as major', () => {
+      expect(roadClass('tertiary')).toBe('major');
+    });
+
+    it('classifies motorway_link as major', () => {
+      expect(roadClass('motorway_link')).toBe('major');
+    });
+
+    it('classifies residential as street', () => {
+      expect(roadClass('residential')).toBe('street');
+    });
+
+    it('classifies unclassified as street', () => {
+      expect(roadClass('unclassified')).toBe('street');
+    });
+
+    it('classifies service as service', () => {
+      expect(roadClass('service')).toBe('service');
+    });
+
+    it('classifies living_street as shared', () => {
+      expect(roadClass('living_street')).toBe('shared');
+    });
+
+    it('falls back to street for unknown types', () => {
+      expect(roadClass('bogus')).toBe('street');
+    });
+
+    it('is case-insensitive', () => {
+      expect(roadClass('PRIMARY')).toBe('major');
+      expect(roadClass('Service')).toBe('service');
+    });
+  });
+
+  describe('findJunctions', () => {
+    function road(
+      id: number,
+      type: string,
+      points: { x: number; z: number }[],
+    ): PolylineRoad {
+      return {
+        name: String(id),
+        type,
+        lanes: 2,
+        width: 8,
+        oneway: 0,
+        access: 'yes',
+        points,
+      };
+    }
+
+    it('detects a T junction (3 roads sharing a node)', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(3, 'residential', [
+          { x: 0, z: 100 },
+          { x: 0, z: 0 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(1);
+      expect(junctions[0].roadCount).toBe(3);
+      expect(junctions[0].position.x).toBeCloseTo(0, 1);
+      expect(junctions[0].position.z).toBeCloseTo(0, 1);
+    });
+
+    it('detects a cross junction (4 roads sharing a node)', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(3, 'residential', [
+          { x: 0, z: 100 },
+          { x: 0, z: 0 },
+        ]),
+        road(4, 'residential', [
+          { x: 0, z: -100 },
+          { x: 0, z: 0 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(1);
+      expect(junctions[0].roadCount).toBe(4);
+    });
+
+    it('does not treat a two-road way split as a junction', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 0, z: 0 },
+          { x: 100, z: 0 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(0);
+    });
+
+    it('ignores roads that pass without sharing a node', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 100, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 0, z: -100 },
+          { x: 0, z: 100 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(0);
+    });
+
+    it('sets radius from the widest meeting road', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        { ...road(3, 'residential', [{ x: 0, z: 100 }, { x: 0, z: 0 }]), width: 24 },
+      ]);
+      expect(junctions).toHaveLength(1);
+      expect(junctions[0].radius).toBe(12);
+    });
+
+    it('is empty when no roads meet', () => {
+      expect(findJunctions([road(1, 'residential', [{ x: 0, z: 0 }, { x: 10, z: 0 }])])).toEqual([]);
+    });
+
+    it('detects a T junction where one road passes through', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+          { x: 100, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 0, z: -100 },
+          { x: 0, z: 0 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(1);
+      expect(junctions[0].roadCount).toBe(3);
+      expect(junctions[0].position.x).toBeCloseTo(0, 1);
+      expect(junctions[0].position.z).toBeCloseTo(0, 1);
+    });
+
+    it('detects a crossing where both roads pass through', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+          { x: 100, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 0, z: -100 },
+          { x: 0, z: 0 },
+          { x: 0, z: 100 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(1);
+      expect(junctions[0].roadCount).toBe(4);
+    });
+
+    it('keeps a two-road way split out even with a through segment', () => {
+      const junctions = findJunctions([
+        road(1, 'residential', [
+          { x: -100, z: 0 },
+          { x: 0, z: 0 },
+        ]),
+        road(2, 'residential', [
+          { x: 0, z: 0 },
+          { x: 0, z: 100 },
+          { x: 0, z: 200 },
+        ]),
+      ]);
+      expect(junctions).toHaveLength(0);
+    });
+  });
+
+  describe('JunctionGrid', () => {
+    it('finds junctions near a point and far ones not at all', () => {
+      const grid = new JunctionGrid([
+        { position: { x: 0, z: 0 }, roadCount: 3, radius: 6 },
+        { position: { x: 1000, z: 1000 }, roadCount: 3, radius: 6 },
+      ]);
+      expect(grid.near(10, 10, 50)).toHaveLength(1);
+      expect(grid.near(10, 10, 50)[0].position).toEqual({ x: 0, z: 0 });
+      expect(grid.near(990, 990, 50)).toHaveLength(1);
+      expect(grid.near(500, 500, 10)).toHaveLength(0);
+    });
+
+    it('finds junctions inside a bounding box (nearBBox)', () => {
+      const grid = new JunctionGrid([
+        { position: { x: 10, z: 10 }, roadCount: 3, radius: 6 },
+        { position: { x: -10, z: -10 }, roadCount: 3, radius: 6 },
+      ]);
+      expect(grid.nearBBox(-20, 20, -20, 20)).toHaveLength(2);
+      expect(grid.nearBBox(0, 100, 0, 100)).toHaveLength(1);
+      expect(grid.nearBBox(500, 600, 500, 600)).toHaveLength(0);
+    });
+
+    it('is empty when there are no junctions', () => {
+      const grid = new JunctionGrid([]);
+      expect(grid.near(0, 0, 100)).toHaveLength(0);
+      expect(grid.nearBBox(0, 100, 0, 100)).toHaveLength(0);
+    });
+  });
+
+  describe('projectOntoRoad', () => {
+    const pts = [
+      { x: 0, z: 0 },
+      { x: 30, z: 0 },
+      { x: 30, z: 40 },
+    ];
+
+    it('is along 0 at the start of the road', () => {
+      expect(projectOntoRoad(pts, { x: 0, z: 0 }).along).toBe(0);
+    });
+
+    it('measures distance along the polyline', () => {
+      expect(projectOntoRoad(pts, { x: 30, z: 40 }).along).toBeCloseTo(70, 6);
+      expect(projectOntoRoad(pts, { x: 15, z: 0 }).along).toBeCloseTo(15, 6);
+    });
+
+    it('projects a point beside a segment onto it', () => {
+      const { along, lateral } = projectOntoRoad(pts, { x: 5, z: 20 });
+      expect(along).toBeCloseTo(5, 6);
+      expect(lateral).toBeCloseTo(20, 6);
+    });
+
+    it('reports zero lateral distance for a point on the centreline', () => {
+      const { along, lateral } = projectOntoRoad(pts, { x: 30, z: 20 });
+      expect(along).toBeCloseTo(50, 6);
+      expect(lateral).toBeCloseTo(0, 6);
+    });
+  });
+
+  describe('markingPattern', () => {
+    function roadWith(overrides: Partial<PolylineRoad>): PolylineRoad {
+      return {
+        name: '',
+        type: 'residential',
+        lanes: 2,
+        width: 8,
+        oneway: 0,
+        access: 'yes',
+        points: [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        ...overrides,
+      };
+    }
+
+    it('gives a two-way street a dashed centre line', () => {
+      expect(markingPattern(roadWith({}))).toBe('two-way-dashed');
+    });
+
+    it('gives a two-way major road with 4+ lanes a double centre line', () => {
+      expect(markingPattern(roadWith({ type: 'primary', lanes: 4 }))).toBe(
+        'two-way-double',
+      );
+    });
+
+    it('keeps two-way dashed for a major road with few lanes', () => {
+      expect(markingPattern(roadWith({ type: 'primary', lanes: 2 }))).toBe(
+        'two-way-dashed',
+      );
+    });
+
+    it('gives a one-way road the one-way pattern', () => {
+      expect(markingPattern(roadWith({ oneway: 1 }))).toBe('one-way');
+      expect(markingPattern(roadWith({ oneway: -1, type: 'primary' }))).toBe('one-way');
+    });
+
+    it('gives service roads no markings', () => {
+      expect(markingPattern(roadWith({ type: 'service' }))).toBe('none');
+      expect(markingPattern(roadWith({ type: 'service', oneway: 1 }))).toBe('none');
+    });
+
+    it('gives living streets no markings', () => {
+      expect(markingPattern(roadWith({ type: 'living_street' }))).toBe('none');
+    });
   });
 });

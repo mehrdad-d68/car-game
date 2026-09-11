@@ -28,6 +28,8 @@ export class PropPool {
     }
     this.mesh.count = instances.length;
     this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.boundingSphere = null;
+    this.mesh.boundingBox = null;
   }
 
   dispose(): void {

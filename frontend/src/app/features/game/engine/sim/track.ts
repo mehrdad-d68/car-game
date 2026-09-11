@@ -1,12 +1,79 @@
 import { MapItem, OSMMapData, StationItem } from './osm-types';
 import { Vec2 } from './types';
 
+export type RoadClass = 'major' | 'street' | 'service' | 'shared';
+
 export interface PolylineRoad {
   name: string;
+  type: string;
+  lanes: number;
   width: number;
   oneway: 0 | 1 | -1;
   access: string;
   points: Vec2[];
+}
+
+export function roadClass(type: string): RoadClass {
+  const t = type.toLowerCase();
+  if (
+    t === 'motorway' ||
+    t === 'primary' ||
+    t === 'secondary' ||
+    t === 'tertiary' ||
+    t.endsWith('_link')
+  ) {
+    return 'major';
+  }
+  if (t === 'service') return 'service';
+  if (t === 'living_street') return 'shared';
+  return 'street';
+}
+
+export type MarkingPattern = 'none' | 'two-way-dashed' | 'two-way-double' | 'one-way';
+
+export function markingPattern(road: PolylineRoad): MarkingPattern {
+  const cls = roadClass(road.type);
+  if (cls === 'service' || cls === 'shared') return 'none';
+  const lanes = Math.max(road.lanes, 1);
+  if (road.oneway !== 0) return 'one-way';
+  if (cls === 'major' && lanes >= 4) return 'two-way-double';
+  return 'two-way-dashed';
+}
+
+export function projectOntoRoad(
+  points: Vec2[],
+  position: Vec2,
+): { along: number; lateral: number } {
+  let running = 0;
+  let bestAlong = 0;
+  let bestLateral = Infinity;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const segLen = Math.hypot(dx, dz);
+
+    let t = 0;
+    if (segLen > 1e-9) {
+      t =
+        ((position.x - a.x) * dx + (position.z - a.z) * dz) /
+        (segLen * segLen);
+      t = Math.max(0, Math.min(1, t));
+    }
+
+    const projX = a.x + dx * t;
+    const projZ = a.z + dz * t;
+    const lateral = Math.hypot(position.x - projX, position.z - projZ);
+    if (lateral < bestLateral) {
+      bestLateral = lateral;
+      bestAlong = running + segLen * t;
+    }
+    running += segLen;
+  }
+
+  return { along: bestAlong, lateral: bestLateral };
 }
 
 export interface TrackBounds {
@@ -171,6 +238,124 @@ function stationItems(
   }));
 }
 
+export interface Junction {
+  position: Vec2;
+  roadCount: number;
+  radius: number;
+}
+
+function roundKey(v: number): number {
+  return Math.round(v * 4);
+}
+
+function nodeHash(x: number, z: number): number {
+  return roundKey(x) * 73856093 ^ roundKey(z) * 19349663;
+}
+
+const GRID_CELL = 60;
+const GRID_SHIFT = 32768;
+
+function cellKey(cx: number, cz: number): number {
+  return (cx * 73856093) ^ (cz * 19349663);
+}
+
+export class JunctionGrid {
+  private readonly cells = new Map<number, Junction[]>();
+
+  constructor(junctions: Junction[]) {
+    for (const j of junctions) {
+      const cx = Math.floor(j.position.x / GRID_CELL) + GRID_SHIFT;
+      const cz = Math.floor(j.position.z / GRID_CELL) + GRID_SHIFT;
+      const key = cellKey(cx, cz);
+      let bucket = this.cells.get(key);
+      if (!bucket) {
+        bucket = [];
+        this.cells.set(key, bucket);
+      }
+      bucket.push(j);
+    }
+  }
+
+  near(x: number, z: number, radius: number): Junction[] {
+    return this.nearBBox(x - radius, x + radius, z - radius, z + radius);
+  }
+
+  nearBBox(minX: number, maxX: number, minZ: number, maxZ: number): Junction[] {
+    const out: Junction[] = [];
+    const minCx = Math.floor(minX / GRID_CELL) + GRID_SHIFT;
+    const maxCx = Math.floor(maxX / GRID_CELL) + GRID_SHIFT;
+    const minCz = Math.floor(minZ / GRID_CELL) + GRID_SHIFT;
+    const maxCz = Math.floor(maxZ / GRID_CELL) + GRID_SHIFT;
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const bucket = this.cells.get(cellKey(cx, cz));
+        if (bucket) out.push(...bucket);
+      }
+    }
+    return out;
+  }
+}
+
+interface JunctionNode {
+  x: number;
+  z: number;
+  arms: Map<number, number>;
+}
+
+export function findJunctions(roads: PolylineRoad[]): Junction[] {
+  const nodes = new Map<number, JunctionNode>();
+  const roadWidths = new Map<number, number>();
+
+  function nodeAt(x: number, z: number): JunctionNode {
+    const hash = nodeHash(x, z);
+    let node = nodes.get(hash);
+    if (!node) {
+      node = { x, z, arms: new Map() };
+      nodes.set(hash, node);
+    }
+    return node;
+  }
+
+  function addArms(node: JunctionNode, roadId: number, arms: number): void {
+    const current = node.arms.get(roadId) ?? 0;
+    if (arms > current) node.arms.set(roadId, arms);
+  }
+
+  roads.forEach((road, idx) => {
+    const pts = road.points;
+    if (pts.length < 2) return;
+    roadWidths.set(idx, road.width);
+
+    addArms(nodeAt(pts[0].x, pts[0].z), idx, 1);
+    const last = pts[pts.length - 1];
+    addArms(nodeAt(last.x, last.z), idx, 1);
+
+    for (let i = 1; i < pts.length - 1; i++) {
+      addArms(nodeAt(pts[i].x, pts[i].z), idx, 2);
+    }
+  });
+
+  const junctions: Junction[] = [];
+  for (const node of nodes.values()) {
+    if (node.arms.size < 2) continue;
+    let arms = 0;
+    let maxW = 0;
+    for (const [rid, count] of node.arms) {
+      arms += count;
+      const w = roadWidths.get(rid) ?? 6;
+      if (w > maxW) maxW = w;
+    }
+    if (arms < 3) continue;
+    junctions.push({
+      position: { x: node.x, z: node.z },
+      roadCount: arms,
+      radius: maxW / 2,
+    });
+  }
+
+  return junctions;
+}
+
 export function createTrack(osmData: OSMMapData): TrackData {
   const roads: PolylineRoad[] = [];
 
@@ -187,7 +372,7 @@ export function createTrack(osmData: OSMMapData): TrackData {
     const points: Vec2[] = road.points.map((p) => ({ x: p.x, z: p.z }));
     const width = quantizeWidth(road.width);
 
-    roads.push({ name: road.name ?? '', width, oneway: road.oneway, access: road.access, points });
+    roads.push({ name: road.name ?? '', type: road.type, lanes: road.lanes, width, oneway: road.oneway, access: road.access, points });
 
     for (const p of points) {
       if (p.x < minX) minX = p.x;

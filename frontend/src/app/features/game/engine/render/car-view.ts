@@ -83,13 +83,9 @@ export class CarView {
     this.addLamps(this.appearance.taillight);
   }
 
-  sync(previous: CarState, current: CarState, alpha: number): void {
-    this.group.position.set(
-      previous.position.x + (current.position.x - previous.position.x) * alpha,
-      ROAD_HEIGHT,
-      previous.position.z + (current.position.z - previous.position.z) * alpha,
-    );
-    this.group.rotation.y = previous.heading + (current.heading - previous.heading) * alpha;
+  sync(state: CarState): void {
+    this.group.position.set(state.position.x, ROAD_HEIGHT, state.position.z);
+    this.group.rotation.y = state.heading;
   }
 
   dispose(): void {
