@@ -54,8 +54,8 @@ export function fetchModelBinary(url: string): Promise<ArrayBuffer> {
 function disposeMaterial(material: THREE.Material): void {
   const textures = new Set<THREE.Texture>();
   for (const value of Object.values(material)) {
-    if ((value as THREE.Texture).isTexture) {
-      textures.add(value as THREE.Texture);
+    if (value instanceof THREE.Texture) {
+      textures.add(value);
     }
   }
   for (const texture of textures) {

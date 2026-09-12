@@ -127,5 +127,10 @@ export class StreetSearchComponent {
   onSelect(street: StreetOption | null): void {
     if (!street) return;
     this.streetSelected.emit(street);
+    requestAnimationFrame(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
   }
 }
