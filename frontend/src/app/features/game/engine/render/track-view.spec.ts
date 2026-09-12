@@ -10,6 +10,7 @@ import {
   filterArrowsByJunctions,
   planBarriers,
   planDirectionArrows,
+  planCoverageCuts,
   planSidewalkCuts,
   planStreetLabels,
   TrackView,
@@ -1152,6 +1153,63 @@ describe('TrackView', () => {
         expect(through[0].side).toBe('left');
         expect(through[0].start).toBeCloseTo(50 + 6 - 4 * Math.SQRT2, 5);
         expect(through[0].end).toBeCloseTo(50 + 8.5 + 4 * Math.SQRT2, 5);
+      });
+
+
+    describe('planCoverageCuts', () => {
+      function coverageFor(roads: OSMMapData['roads']) {
+        const track = trackWith(roads);
+        const cuts = planCoverageCuts(track.roads);
+        return track.roads.map((r) => cuts.get(r) ?? []);
+      }
+
+      it('cuts both sidewalks between carriageways too close to hold either', () => {
+        const [first, second] = coverageFor([
+          osmRoad(1, 'secondary', 8, [[0, 0], [120, 0]]),
+          osmRoad(2, 'secondary', 8, [[0, 8], [120, 8]]),
+        ]);
+        expect(first.map((c) => c.side)).toEqual(['left']);
+        expect(second.map((c) => c.side)).toEqual(['right']);
+        for (const cut of [...first, ...second]) {
+          expect(cut.start).toBeCloseTo(0, 5);
+          expect(cut.end).toBeCloseTo(120, 5);
+        }
+      });
+
+      it('keeps the wider road sidewalk when the gap holds exactly one', () => {
+        const [wide, narrow] = coverageFor([
+          osmRoad(1, 'primary', 12, [[0, 0], [120, 0]]),
+          osmRoad(2, 'residential', 8, [[0, 14], [120, 14]]),
+        ]);
+        expect(wide).toHaveLength(0);
+        expect(narrow.map((c) => c.side)).toEqual(['right']);
+      });
+
+      it('leaves roads that run far apart alone', () => {
+        const cuts = coverageFor([
+          osmRoad(1, 'secondary', 8, [[0, 0], [120, 0]]),
+          osmRoad(2, 'secondary', 8, [[0, 40], [120, 40]]),
+        ]);
+        expect(cuts.flat()).toHaveLength(0);
+      });
+    });
+
+      it('cuts the inner sidewalks where a road splits into two carriageways at a shallow angle', () => {
+        const angle = (5 * Math.PI) / 180;
+        const far = 80;
+        const [main, upper, lower] = cutsFor([
+          osmRoad(1, 'secondary', 12, [[-50, 0], [0, 0]]),
+          osmRoad(2, 'secondary', 8, [[0, 0], [far * Math.cos(angle), far * Math.sin(angle)]]),
+          osmRoad(3, 'secondary', 8, [[0, 0], [far * Math.cos(angle), -far * Math.sin(angle)]]),
+        ]);
+        expect(main).toHaveLength(0);
+        expect(upper).toHaveLength(1);
+        expect(lower).toHaveLength(1);
+        expect(upper[0].side).not.toBe(lower[0].side);
+        for (const cut of [upper[0], lower[0]]) {
+          expect(cut.start).toBeCloseTo(0, 5);
+          expect(cut.end).toBeGreaterThan(55);
+        }
       });
     });
 

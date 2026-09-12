@@ -25,5 +25,10 @@ export class CarSelectComponent {
   onSelect(car: CarSpec | null): void {
     if (!car) return;
     this.carSelected.emit(car);
+    requestAnimationFrame(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
   }
 }

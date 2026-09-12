@@ -1,4 +1,5 @@
-import { clearModelCache, fetchModelBinary, fitModel } from './model-loader';
+import * as THREE from 'three';
+import { clearModelCache, disposeModel, fetchModelBinary, fitModel } from './model-loader';
 
 describe('fitModel', () => {
   it('derives the scale from the model bounding box length', () => {
@@ -106,5 +107,34 @@ describe('fetchModelBinary', () => {
     await fetchModelBinary(url);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+describe('disposeModel', () => {
+  function modelWith(material: THREE.Material): { group: THREE.Group; geometry: THREE.BufferGeometry } {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(geometry, material));
+    return { group, geometry };
+  }
+
+  it('disposes a model whose materials have empty texture slots', () => {
+    const material = new THREE.MeshStandardMaterial();
+    const { group, geometry } = modelWith(material);
+    const disposeGeometry = vi.spyOn(geometry, 'dispose');
+    const disposeMaterial = vi.spyOn(material, 'dispose');
+
+    expect(() => disposeModel(group)).not.toThrow();
+    expect(disposeGeometry).toHaveBeenCalled();
+    expect(disposeMaterial).toHaveBeenCalled();
+  });
+
+  it('disposes the textures a material uses', () => {
+    const map = new THREE.Texture();
+    const material = new THREE.MeshStandardMaterial({ map });
+    const disposeMap = vi.spyOn(map, 'dispose');
+
+    disposeModel(modelWith(material).group);
+
+    expect(disposeMap).toHaveBeenCalled();
   });
 });

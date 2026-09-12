@@ -689,7 +689,11 @@ export function planSidewalkCuts(roads: PolylineRoad[]): Map<PolylineRoad, Sidew
         for (const arm of other.arms) {
           const cross = self.tangent.x * arm.z - self.tangent.z * arm.x;
           const sin = Math.abs(cross);
-          if (sin < CONTINUATION_SIN) continue;
+          if (sin < 1e-6) continue;
+          // A shallow arm only continues this road when it points away from it;
+          // one that leaves alongside this road's own arm overlaps it.
+          const alongside = self.arms.some((own) => own.x * arm.x + own.z * arm.z > 0);
+          if (sin < CONTINUATION_SIN && !alongside) continue;
           const cot = (self.tangent.x * arm.x + self.tangent.z * arm.z) / sin;
           const halfGap = clearance / sin;
           const crossAtKerb = kerbLine * cot;
@@ -708,6 +712,163 @@ export function planSidewalkCuts(roads: PolylineRoad[]): Map<PolylineRoad, Sidew
     }
   }
   return cuts;
+}
+
+const COVERAGE_STEP = 2;
+const COVERAGE_MARGIN = 0.25;
+const COVERAGE_CELL = 25;
+const COVERAGE_PAD = SIDEWALK_WIDTH / 2 + 0.5;
+
+interface CoverageSegment {
+  road: number;
+  ax: number;
+  az: number;
+  bx: number;
+  bz: number;
+  half: number;
+  walk: number;
+}
+
+function coverageWins(a: number, b: number, roads: PolylineRoad[]): boolean {
+  const wa = roads[a].width;
+  const wb = roads[b].width;
+  if (wa !== wb) return wa > wb;
+  return a < b;
+}
+
+// Every segment goes into the cells its own carriageway and sidewalk can reach,
+// so a sample point only has to look in the one cell it sits in.
+function buildCoverageIndex(roads: PolylineRoad[]): Map<number, CoverageSegment[]> {
+  const cells = new Map<number, CoverageSegment[]>();
+  roads.forEach((road, index) => {
+    const half = road.width / 2;
+    const walk = edgeWalkWidth(road);
+    const pad = half + walk + COVERAGE_PAD;
+    for (let i = 0; i < road.points.length - 1; i++) {
+      const a = road.points[i];
+      const b = road.points[i + 1];
+      const seg: CoverageSegment = { road: index, ax: a.x, az: a.z, bx: b.x, bz: b.z, half, walk };
+      const minCx = Math.floor((Math.min(a.x, b.x) - pad) / COVERAGE_CELL);
+      const maxCx = Math.floor((Math.max(a.x, b.x) + pad) / COVERAGE_CELL);
+      const minCz = Math.floor((Math.min(a.z, b.z) - pad) / COVERAGE_CELL);
+      const maxCz = Math.floor((Math.max(a.z, b.z) + pad) / COVERAGE_CELL);
+      for (let cx = minCx; cx <= maxCx; cx++) {
+        for (let cz = minCz; cz <= maxCz; cz++) {
+          const key = roadCellKey(cx + ROAD_GRID_SHIFT, cz + ROAD_GRID_SHIFT);
+          const bucket = cells.get(key);
+          if (bucket) {
+            bucket.push(seg);
+          } else {
+            cells.set(key, [seg]);
+          }
+        }
+      }
+    }
+  });
+  return cells;
+}
+
+function distanceToSegment(seg: CoverageSegment, x: number, z: number): number {
+  const sx = seg.bx - seg.ax;
+  const sz = seg.bz - seg.az;
+  const lenSq = sx * sx + sz * sz;
+  const t = lenSq < 1e-12 ? 0 : Math.max(0, Math.min(1, ((x - seg.ax) * sx + (z - seg.az) * sz) / lenSq));
+  return Math.hypot(x - (seg.ax + sx * t), z - (seg.az + sz * t));
+}
+
+// A sidewalk may not lie on another carriageway, nor on the sidewalk of a road
+// that outranks it. Cuts taken at shared nodes cannot see this: carriageways
+// running side by side overlap without ever meeting at a node.
+export function planCoverageCuts(roads: PolylineRoad[]): Map<PolylineRoad, SidewalkCut[]> {
+  const cells = buildCoverageIndex(roads);
+  const cuts = new Map<PolylineRoad, SidewalkCut[]>();
+
+  roads.forEach((road, index) => {
+    const walk = edgeWalkWidth(road);
+    const points = road.points;
+    if (walk <= 0 || points.length < 2) return;
+    const dists = cumulativeDistances(points);
+    const length = dists[dists.length - 1];
+    if (length < MIN_SPAN_LENGTH) return;
+    const middle = road.width / 2 + walk / 2;
+
+    for (const side of SIDES) {
+      const sign = side === 'left' ? 1 : -1;
+      let open: number | null = null;
+
+      for (let i = 0; i < points.length - 1; i++) {
+        const a = points[i];
+        const b = points[i + 1];
+        const dir = unitVector(b.x - a.x, b.z - a.z);
+        const span = dists[i + 1] - dists[i];
+        if (!dir || span < 1e-6) continue;
+        const nx = -dir.z * sign;
+        const nz = dir.x * sign;
+        const last = i === points.length - 2;
+
+        for (let s = dists[i]; ; s += COVERAGE_STEP) {
+          const at = Math.min(s, dists[i + 1]);
+          const t = (at - dists[i]) / span;
+          const cx = a.x + (b.x - a.x) * t + nx * middle;
+          const cz = a.z + (b.z - a.z) * t + nz * middle;
+
+          let covered = false;
+          const bucket = cells.get(
+            roadCellKey(
+              Math.floor(cx / COVERAGE_CELL) + ROAD_GRID_SHIFT,
+              Math.floor(cz / COVERAGE_CELL) + ROAD_GRID_SHIFT,
+            ),
+          );
+          if (bucket) {
+            for (const seg of bucket) {
+              if (seg.road === index) continue;
+              const reach =
+                seg.half +
+                (coverageWins(seg.road, index, roads) ? seg.walk : 0) +
+                walk / 2 -
+                COVERAGE_MARGIN;
+              if (distanceToSegment(seg, cx, cz) < reach) {
+                covered = true;
+                break;
+              }
+            }
+          }
+
+          if (covered && open === null) open = at;
+          const done = at >= dists[i + 1];
+          if (open !== null && (!covered || (done && last))) {
+            const list = cuts.get(road) ?? [];
+            list.push({
+              side,
+              start: Math.max(0, open - COVERAGE_STEP / 2),
+              end: Math.min(length, covered ? at : at - COVERAGE_STEP / 2),
+            });
+            cuts.set(road, list);
+            open = null;
+          }
+          if (done) break;
+        }
+      }
+    }
+  });
+  return cuts;
+}
+
+function mergeCuts(
+  ...maps: Map<PolylineRoad, SidewalkCut[]>[]
+): Map<PolylineRoad, SidewalkCut[]> {
+  const merged = new Map<PolylineRoad, SidewalkCut[]>();
+  for (const map of maps) {
+    for (const [road, list] of map) {
+      const existing = merged.get(road);
+      if (existing) {
+        existing.push(...list);
+      } else {
+        merged.set(road, [...list]);
+      }
+    }
+  }
+  return merged;
 }
 
 function keptSpans(length: number, cuts: SidewalkCut[], side: SidewalkSide): [number, number][] {
@@ -882,7 +1043,7 @@ export class TrackView {
       if (j.radius > maxRadius) maxRadius = j.radius;
     }
     this.nearMargin = maxRadius + 5;
-    this.sidewalkCuts = planSidewalkCuts(track.roads);
+    this.sidewalkCuts = mergeCuts(planSidewalkCuts(track.roads), planCoverageCuts(track.roads));
     this.buildGround();
     this.buildRoads();
     this.buildJunctionPatches();
