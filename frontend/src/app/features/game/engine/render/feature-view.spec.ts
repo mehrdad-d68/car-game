@@ -583,3 +583,17 @@ describe('Vienna prop placement guard', () => {
     view.dispose();
   });
 });
+
+describe('FeatureView toon rendering', () => {
+  it('draws props with the toon ramp so they match the buildings', () => {
+    const view = new FeatureView(createTrack(viennaData as OSMMapData), PROP_SPECS);
+
+    for (const pool of view.pools) {
+      const material = pool.mesh.material as THREE.MeshToonMaterial;
+      expect(material.type).toBe('MeshToonMaterial');
+      expect(material.gradientMap).toBeDefined();
+    }
+
+    view.dispose();
+  });
+});

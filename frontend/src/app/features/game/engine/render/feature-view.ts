@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { MapItemKind } from '../sim/osm-types';
 import { PropPart, PropSpec, PropVariant } from '../sim/prop-spec';
 import { PolylineRoad, TrackData } from '../sim/track';
+import { createToonRamp } from './building-textures';
 import { ROAD_HEIGHT, SURFACE_OFFSET } from './constants';
 import { PartInstance, PropPool } from './prop-pool';
 
@@ -455,6 +456,7 @@ export class FeatureView {
   }
 
   private readonly cells = new Map<number, number[]>();
+  private readonly toonRamp = createToonRamp();
   private flags = new Uint8Array(0);
   private readonly windowScratch: number[] = [];
   private windowCount = 0;
@@ -505,8 +507,9 @@ export class FeatureView {
       const first = atoms[0].part;
       const pool = new PropPool(
         new THREE.BoxGeometry(first.size[0], first.size[1], first.size[2]),
-        new THREE.MeshLambertMaterial({
+        new THREE.MeshToonMaterial({
           color: first.color,
+          gradientMap: this.toonRamp,
           ...(first.emissive !== undefined ? { emissive: first.emissive } : {}),
         }),
         atoms.length,
@@ -832,5 +835,6 @@ export class FeatureView {
     this.cells.clear();
     this.windowCount = 0;
     this.modelRecords.length = 0;
+    this.toonRamp.dispose();
   }
 }

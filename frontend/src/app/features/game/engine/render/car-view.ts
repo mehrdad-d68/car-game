@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CarAppearance, CarLamp } from '../sim/car-spec';
 import { CarState } from '../sim/types';
+import { createToonRamp } from './building-textures';
 import { ROAD_HEIGHT } from './constants';
 import { disposeModel } from './model-loader';
 
@@ -31,7 +32,9 @@ export class CarView {
     part: { width: number; height: number; length: number; color: number; position: [number, number, number] },
     castShadow: boolean,
   ): void {
-    const mat = this.track(new THREE.MeshStandardMaterial({ color: part.color }));
+    const mat = this.track(
+      new THREE.MeshToonMaterial({ color: part.color, gradientMap: createToonRamp() }),
+    );
     const mesh = new THREE.Mesh(
       this.track(new THREE.BoxGeometry(part.width, part.height, part.length)),
       mat,
@@ -43,10 +46,11 @@ export class CarView {
 
   private addLamps(lamp: CarLamp): void {
     const mat = this.track(
-      new THREE.MeshStandardMaterial({
+      new THREE.MeshToonMaterial({
         color: lamp.color,
         emissive: lamp.emissive,
         emissiveIntensity: lamp.emissiveIntensity,
+        gradientMap: createToonRamp(),
       }),
     );
     const geo = this.track(new THREE.BoxGeometry(lamp.width, lamp.height, lamp.length));
@@ -71,7 +75,7 @@ export class CarView {
     );
     wheelGeo.rotateZ(Math.PI / 2);
     const wheelMat = this.track(
-      new THREE.MeshStandardMaterial({ color: this.appearance.wheel.color }),
+      new THREE.MeshToonMaterial({ color: this.appearance.wheel.color, gradientMap: createToonRamp() }),
     );
     for (const [x, y, z] of this.appearance.wheel.positions) {
       const wheel = new THREE.Mesh(wheelGeo, wheelMat);

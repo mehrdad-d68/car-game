@@ -23,6 +23,15 @@ export interface OSMRoad {
   points: Point[];
 }
 
+export interface OSMBuilding {
+  id: number;
+  type: string;
+  name: string;
+  levels?: number;
+  height?: number;
+  points: Point[];
+}
+
 export const MAP_ITEM_KINDS = [
   'trafficLight',
   'pedestrianCrossing',
@@ -74,5 +83,6 @@ export type MapItem =
 export interface OSMMapData {
   meta: OSMMeta;
   roads: OSMRoad[];
+  buildings?: OSMBuilding[];
   items?: MapItem[];
 }

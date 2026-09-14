@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { FixedStepLoop } from './loop';
 import { CarSource, InputSource, PropSource, TrackSource } from './ports';
 import { CameraRig } from './render/camera-rig';
+import { BuildingView } from './render/building-view';
+import { createBuildingTextures } from './render/building-textures';
 import { CarView } from './render/car-view';
 import { FeatureView } from './render/feature-view';
 import { clearModelCache, disposeModel, loadCarModel } from './render/model-loader';
@@ -27,6 +29,7 @@ export class Engine {
   private readonly sky: THREE.Color | THREE.Texture | null;
   private trackView: TrackView;
   private featureView: FeatureView;
+  private buildingView: BuildingView;
   private carView: CarView;
   private readonly rig = new CameraRig(1);
   private readonly viewport: Viewport;
@@ -77,7 +80,17 @@ export class Engine {
     this.trackView = new TrackView(track);
     this.trackView.buildLabels();
     this.featureView = new FeatureView(track, props, propModels);
-    this.scene.add(this.trackView.group, this.featureView.group, this.carView.group);
+    this.buildingView = new BuildingView(
+      track.buildings,
+      createBuildingTextures(() => document.createElement('canvas').getContext('2d')),
+    );
+    this.buildingView.update(track.spawn.position.x, track.spawn.position.z);
+    this.scene.add(
+      this.trackView.group,
+      this.featureView.group,
+      this.buildingView.group,
+      this.carView.group,
+    );
 
     this.viewport = new Viewport(container, (aspect) =>
       this.rig.setAspect(aspect),
@@ -168,6 +181,7 @@ export class Engine {
     this.rig.follow(drawn, frameDelta);
     this.trackView.updateLabels(drawn.position.x, drawn.position.z);
     this.featureView.update(drawn.position.x, drawn.position.z);
+    this.buildingView.update(drawn.position.x, drawn.position.z);
 
     this.lights.sun.position.set(
       drawn.position.x + LIGHT_OFFSET.x,
@@ -177,7 +191,7 @@ export class Engine {
     this.lights.sun.target.position.set(drawn.position.x, 0, drawn.position.z);
     this.lights.sun.target.updateMatrixWorld();
 
-    this.viewport.renderer.render(this.scene, this.rig.camera);
+    this.viewport.render(this.scene, this.rig.camera);
   }
 
   teleportTo(x: number, z: number, heading: number): void {
@@ -191,6 +205,7 @@ export class Engine {
     this.carView.dispose();
     this.trackView.dispose();
     this.featureView.dispose();
+    this.buildingView.dispose();
     this.viewport.dispose();
     for (const group of this.propModels.values()) {
       disposeModel(group);

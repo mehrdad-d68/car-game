@@ -1,4 +1,5 @@
 import { MapItem, OSMMapData, StationItem } from './osm-types';
+import { Building, createBuildings } from './buildings';
 import { Vec2 } from './types';
 
 export type RoadClass = 'major' | 'street' | 'service' | 'shared';
@@ -132,6 +133,7 @@ export interface TrackData {
   bounds: TrackBounds;
   spawn: Spawn;
   features: MapFeatures;
+  buildings: Building[];
 }
 
 const WIDTH_BUCKETS = [6, 8, 10, 12, 14, 16, 18, 20, 24];
@@ -421,5 +423,6 @@ export function createTrack(osmData: OSMMapData): TrackData {
     },
     spawn: selectSpawn(roads),
     features,
+    buildings: createBuildings(osmData.buildings ?? []),
   };
 }

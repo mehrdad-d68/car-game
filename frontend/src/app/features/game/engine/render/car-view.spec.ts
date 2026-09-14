@@ -99,4 +99,16 @@ describe('CarView', () => {
     expect(scene.children).not.toContain(first.group);
     expect(second.group.children.some((c) => c.visible)).toBe(true);
   });
+
+  it('draws all built-in parts with the toon ramp', () => {
+    const view = new CarView(APPEARANCE);
+
+    const meshes = view.group.children.filter((c) => c.visible) as THREE.Mesh[];
+    expect(meshes.length).toBeGreaterThan(0);
+    for (const mesh of meshes) {
+      const material = mesh.material as THREE.MeshToonMaterial;
+      expect(material.type).toBe('MeshToonMaterial');
+      expect(material.gradientMap).toBeDefined();
+    }
+  });
 });
