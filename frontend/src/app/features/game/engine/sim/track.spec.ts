@@ -1,4 +1,5 @@
 import { OSMMapData } from './osm-types';
+import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import {
   createTrack,
   findJunctions,
@@ -639,6 +640,26 @@ describe('createTrack', () => {
 
     it('gives living streets no markings', () => {
       expect(markingPattern(roadWith({ type: 'living_street' }))).toBe('none');
+    });
+  });
+
+  describe('createTrack buildings', () => {
+    it('is empty when the map has no buildings', () => {
+      expect(createTrack(SAMPLE_DATA).buildings).toEqual([]);
+    });
+
+    it('builds records from the real map', () => {
+      const track = createTrack(viennaData as never);
+      expect(track.buildings.length).toBeGreaterThan(19000);
+      expect(track.buildings.every((b) => b.points.length >= 3)).toBe(true);
+      expect(track.buildings.every((b) => b.height > 0)).toBe(true);
+      expect([...new Set(track.buildings.map((b) => b.style))].sort()).toEqual([
+        'apartment',
+        'home',
+        'hut',
+        'shop',
+        'works',
+      ]);
     });
   });
 });
