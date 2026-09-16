@@ -1,7 +1,20 @@
 <div #gameContainer class="viewport"></div>
 <div class="search-overlay">
-  <app-street-search (streetSelected)="onStreetSelected($event)" />
+  <app-street-search
+    (streetSelected)="onStreetSelected($event)"
+    (jump)="onJump($event)"
+    (navigate)="onNavigate($event)"
+  />
 </div>
 <div class="car-select-overlay">
   <app-car-select (carSelected)="onCarSelected($event)" />
 </div>
+@if (navigationState(); as state) {
+  <div class="nav-chip">
+    <span>➜ {{ state.street }} · {{ formatDistance(state.remaining) }}</span>
+    <button class="nav-cancel" (click)="cancelNavigation()">×</button>
+  </div>
+}
+@if (noRoute()) {
+  <div class="no-route-message">No route found.</div>
+}

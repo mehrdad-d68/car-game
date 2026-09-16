@@ -1,5 +1,6 @@
 import { MapItem, OSMMapData, StationItem } from './osm-types';
 import { Building, createBuildings } from './buildings';
+import { nodeHash } from './node-key';
 import { Vec2 } from './types';
 
 export type RoadClass = 'major' | 'street' | 'service' | 'shared';
@@ -244,14 +245,6 @@ export interface Junction {
   position: Vec2;
   roadCount: number;
   radius: number;
-}
-
-function roundKey(v: number): number {
-  return Math.round(v * 4);
-}
-
-function nodeHash(x: number, z: number): number {
-  return roundKey(x) * 73856093 ^ roundKey(z) * 19349663;
 }
 
 const GRID_CELL = 60;

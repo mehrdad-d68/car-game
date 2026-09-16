@@ -1,4 +1,5 @@
 export { Engine } from './engine';
+export type { NavigateResult, NavigationState } from './engine';
 export type {
   InputFrame,
   InputSource,

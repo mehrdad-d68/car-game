@@ -9,4 +9,25 @@
   [showClear]="true"
   styleClass="street-select"
   (onChange)="onSelect($event.value)"
-/>
+>
+  <ng-template pTemplate="item" #item let-option>
+    <div class="street-item">
+      <span>{{ option.label }}</span>
+      <div class="street-actions">
+        <button
+          (mousedown)="$event.stopPropagation()"
+          (click)="onJumpClick(option, $event)"
+        >
+          Jump
+        </button>
+        <button
+          class="navigate"
+          (mousedown)="$event.stopPropagation()"
+          (click)="onNavigateClick(option, $event)"
+        >
+          Navigate
+        </button>
+      </div>
+    </div>
+  </ng-template>
+</p-select>

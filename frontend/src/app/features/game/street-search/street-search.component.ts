@@ -116,6 +116,8 @@ export function streetTeleport(candidate: StreetCandidate): StreetOption {
 })
 export class StreetSearchComponent {
   readonly streetSelected = output<StreetOption>();
+  readonly jump = output<StreetOption>();
+  readonly navigate = output<StreetOption>();
 
   readonly streets = signal<StreetOption[]>([]);
   readonly selected = signal<StreetOption | null>(null);
@@ -127,6 +129,22 @@ export class StreetSearchComponent {
   onSelect(street: StreetOption | null): void {
     if (!street) return;
     this.streetSelected.emit(street);
+    this.blurActiveElement();
+  }
+
+  onJumpClick(street: StreetOption, event: Event): void {
+    event.stopPropagation();
+    this.jump.emit(street);
+    this.blurActiveElement();
+  }
+
+  onNavigateClick(street: StreetOption, event: Event): void {
+    event.stopPropagation();
+    this.navigate.emit(street);
+    this.blurActiveElement();
+  }
+
+  private blurActiveElement(): void {
     requestAnimationFrame(() => {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();

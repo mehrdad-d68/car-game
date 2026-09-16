@@ -1,4 +1,6 @@
-import { buildStreetOptions, streetTeleport, StreetOption } from './street-search.component';
+import { TestBed } from '@angular/core/testing';
+import { EnvironmentInjector, runInInjectionContext } from '@angular/core';
+import { buildStreetOptions, streetTeleport, StreetOption, StreetSearchComponent } from './street-search.component';
 import { createTrack } from '../engine/sim/track';
 import { OSMMapData } from '../engine/sim/osm-types';
 
@@ -157,5 +159,42 @@ describe('buildStreetOptions', () => {
     });
     const options = buildStreetOptions(createTrack(d));
     expect(options.every((o) => o.label.length > 0)).toBe(true);
+  });
+});
+
+describe('StreetSearchComponent button actions', () => {
+  const option: StreetOption = { label: 'Zedgasse', x: 0, z: 0, heading: 0 };
+
+  let injector: EnvironmentInjector;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({}).compileComponents();
+    injector = TestBed.inject(EnvironmentInjector);
+  });
+
+  it('jump click emits jump and stops the row selection', () => {
+    const comp = runInInjectionContext(injector, () => new StreetSearchComponent());
+    const jumps: StreetOption[] = [];
+    comp.jump.subscribe((s: StreetOption) => jumps.push(s));
+
+    const event = new Event('click');
+    const stop = vi.spyOn(event, 'stopPropagation');
+    comp.onJumpClick(option, event);
+
+    expect(jumps).toEqual([option]);
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('navigate click emits navigate and stops the row selection', () => {
+    const comp = runInInjectionContext(injector, () => new StreetSearchComponent());
+    const navs: StreetOption[] = [];
+    comp.navigate.subscribe((s: StreetOption) => navs.push(s));
+
+    const event = new Event('click');
+    const stop = vi.spyOn(event, 'stopPropagation');
+    comp.onNavigateClick(option, event);
+
+    expect(navs).toEqual([option]);
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 });
