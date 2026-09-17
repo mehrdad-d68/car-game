@@ -17,8 +17,21 @@ function road(
   };
 }
 
-function at(x: number, z: number, heading = 0): RouteStart {
-  return { position: { x, z }, heading };
+describe('planRoute output', () => {
+  it('does not share point objects with the graph', () => {
+    const roads = [
+      { name: 'A', type: 'residential', lanes: 2, width: 8, oneway: 0 as const, access: 'yes', points: [{ x: 0, z: 0 }, { x: 100, z: 0 }] },
+    ];
+    const graph = buildRoadGraph(roads);
+    const route = planRoute(graph, roads, { position: { x: 10, z: 0 } }, 'A')!;
+    const before = graph.nodes.map((n) => ({ ...n }));
+    for (const p of route.points) p.x += 1000;
+    expect(graph.nodes).toEqual(before);
+  });
+});
+
+function at(x: number, z: number): RouteStart {
+  return { position: { x, z } };
 }
 
 const DIAMOND: PolylineRoad[] = [
@@ -94,7 +107,7 @@ describe('planRoute', () => {
       road('Approach', { points: [{ x: -100, z: -100 }, { x: -100, z: 0 }] }),
     ];
     const graph = buildRoadGraph(roads);
-    const route = planRoute(graph, roads, at(-100, -80, Math.PI / 2), 'Long');
+    const route = planRoute(graph, roads, at(-100, -80), 'Long');
     expect(route).not.toBeNull();
     const end = route!.points[route!.points.length - 1];
     expect(end.x).toBeCloseTo(-100, 1);

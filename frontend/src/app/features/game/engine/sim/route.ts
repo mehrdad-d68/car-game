@@ -1,10 +1,9 @@
-import { RoadGraph } from './road-graph';
+import { isRestricted, RoadGraph } from './road-graph';
 import { PolylineRoad, projectOntoRoad } from './track';
 import { Vec2 } from './types';
 
 export interface RouteStart {
   position: Vec2;
-  heading: number;
 }
 
 export interface Route {
@@ -85,10 +84,6 @@ function segmentIndexAt(points: Vec2[], along: number): number {
     running += len;
   }
   return points.length - 2;
-}
-
-function isRestricted(access: string): boolean {
-  return access === 'private' || access === 'no';
 }
 
 interface NearestSegment {
@@ -223,9 +218,10 @@ export function planRoute(
         prev = cameFrom[prev];
       }
       const nodes = reversed.reverse();
+      // Copy, don't alias: the graph's nodes are shared by every route planned after this one.
       const points: Vec2[] = [{ x: seed.projX, z: seed.projZ }];
       for (const node of nodes) {
-        points.push(graph.nodes[node]);
+        points.push({ x: graph.nodes[node].x, z: graph.nodes[node].z });
       }
       const cumulative: number[] = [0];
       for (let i = 0; i < points.length - 1; i++) {

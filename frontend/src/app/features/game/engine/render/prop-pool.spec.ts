@@ -57,6 +57,111 @@ describe('PropPool', () => {
     pool.dispose();
   });
 
+  it('appends matrices at the current write offset and reports the start', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      4,
+    );
+
+    const a = new THREE.Matrix4().makeTranslation(1, 0, 0);
+    const b = new THREE.Matrix4().makeTranslation(2, 0, 0);
+    expect(pool.append([a])).toBe(0);
+    expect(pool.append([b])).toBe(1);
+    expect(pool.mesh.count).toBe(2);
+
+    const out = new THREE.Matrix4();
+    pool.mesh.getMatrixAt(0, out);
+    expect(out.elements).toEqual(a.elements);
+    pool.mesh.getMatrixAt(1, out);
+    expect(out.elements).toEqual(b.elements);
+    pool.dispose();
+  });
+
+  it('rejects appends beyond capacity', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      2,
+    );
+    pool.append([new THREE.Matrix4(), new THREE.Matrix4()]);
+    expect(() => pool.append([new THREE.Matrix4()])).toThrow(RangeError);
+    pool.dispose();
+  });
+
+  it('shifts everything above a removed range down into the hole', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      5,
+    );
+
+    const a = new THREE.Matrix4().makeTranslation(1, 0, 0);
+    const b = new THREE.Matrix4().makeTranslation(2, 0, 0);
+    const c = new THREE.Matrix4().makeTranslation(3, 0, 0);
+    const d = new THREE.Matrix4().makeTranslation(4, 0, 0);
+    pool.append([a, b, c, d]);
+    pool.removeRange(1, 2);
+    expect(pool.mesh.count).toBe(2);
+
+    const out = new THREE.Matrix4();
+    pool.mesh.getMatrixAt(0, out);
+    expect(out.elements).toEqual(a.elements);
+    pool.mesh.getMatrixAt(1, out);
+    expect(out.elements).toEqual(d.elements);
+    pool.dispose();
+  });
+
+  it('removeRange moves ahead of the removed head into the hole', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      5,
+    );
+
+    const a = new THREE.Matrix4().makeTranslation(1, 0, 0);
+    const b = new THREE.Matrix4().makeTranslation(2, 0, 0);
+    const c = new THREE.Matrix4().makeTranslation(3, 0, 0);
+    pool.append([a, b, c]);
+    pool.removeRange(0, 2);
+    expect(pool.mesh.count).toBe(1);
+
+    const out = new THREE.Matrix4();
+    pool.mesh.getMatrixAt(0, out);
+    expect(out.elements).toEqual(c.elements);
+    pool.dispose();
+  });
+
+  it('removeRange truncates when the removed range is at the tail', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      5,
+    );
+
+    const a = new THREE.Matrix4().makeTranslation(1, 0, 0);
+    const b = new THREE.Matrix4().makeTranslation(2, 0, 0);
+    pool.append([a, b]);
+    pool.removeRange(1, 1);
+    expect(pool.mesh.count).toBe(1);
+
+    const out = new THREE.Matrix4();
+    pool.mesh.getMatrixAt(0, out);
+    expect(out.elements).toEqual(a.elements);
+    pool.dispose();
+  });
+
+  it('rejects removing a range that is not currently resident', () => {
+    const pool = new PropPool(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshLambertMaterial(),
+      3,
+    );
+    pool.append([new THREE.Matrix4()]);
+    expect(() => pool.removeRange(0, 2)).toThrow(RangeError);
+    pool.dispose();
+  });
+
   it('refreshes its culling bounds when the instances move', () => {
     const pool = new PropPool(
       new THREE.BoxGeometry(1, 1, 1),

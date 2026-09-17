@@ -18,6 +18,7 @@ import { CarModel, CarSpec } from './sim/car-spec';
 import { Guidance, guide, RouteProgress } from './sim/guidance';
 import { MapItemKind } from './sim/osm-types';
 import { PropSpec } from './sim/prop-spec';
+import { advanceNavigation, createNavigationTimers, NavigationTimers } from './sim/navigation';
 import { buildRoadGraph, RoadGraph } from './sim/road-graph';
 import { planRoute, Route } from './sim/route';
 import { TrackData } from './sim/track';
@@ -27,9 +28,6 @@ import { createCarState, interpolateCarState, stepVehicle } from './sim/vehicle'
 const LIGHT_OFFSET = new THREE.Vector3(50, 80, 30);
 const DEFAULT_CAR_ID = 'coupe';
 const NOTIFY_INTERVAL = 0.25;
-const OFF_ROUTE_HOLD = 1.5;
-const REPLAN_INTERVAL = 2;
-const ARRIVE_HOLD = 2;
 
 export type NavigateResult = 'ok' | 'no-route';
 
@@ -66,9 +64,7 @@ export class Engine {
   private routeProgress: RouteProgress = { segmentIndex: 0 };
   private lastGuidance: Guidance | null = null;
   private simSeconds = 0;
-  private offRouteSeconds = 0;
-  private arriveSeconds = 0;
-  private lastReplanSeconds = -Infinity;
+  private navTimers: NavigationTimers = createNavigationTimers();
   private lastNotifySeconds = -Infinity;
   private readonly navListeners = new Set<(state: NavigationState | null) => void>();
 
@@ -241,7 +237,7 @@ export class Engine {
     const route = planRoute(
       this.graph,
       this.track.roads,
-      { position: this.car.position, heading: this.car.heading },
+      { position: this.car.position },
       street,
     );
     if (!route) {
@@ -250,9 +246,7 @@ export class Engine {
     this.route = route;
     this.routeProgress = { segmentIndex: 0 };
     this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
-    this.offRouteSeconds = 0;
-    this.arriveSeconds = 0;
-    this.lastReplanSeconds = -Infinity;
+    this.navTimers = createNavigationTimers();
     this.lastNotifySeconds = this.simSeconds - NOTIFY_INTERVAL;
     this.emitNavigation();
     return 'ok';
@@ -266,15 +260,15 @@ export class Engine {
     this.route = null;
     this.routeProgress = { segmentIndex: 0 };
     this.lastGuidance = null;
-    this.offRouteSeconds = 0;
-    this.arriveSeconds = 0;
+    this.navTimers = createNavigationTimers();
     for (const listener of this.navListeners) {
       listener(null);
     }
   }
 
-  onNavigation(listener: (state: NavigationState | null) => void): void {
+  onNavigation(listener: (state: NavigationState | null) => void): () => void {
     this.navListeners.add(listener);
+    return () => this.navListeners.delete(listener);
   }
 
   private stepNavigation(dt: number): void {
@@ -285,38 +279,24 @@ export class Engine {
 
     this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
 
-    if (this.lastGuidance.offRoute) {
-      this.offRouteSeconds += dt;
-      if (
-        this.offRouteSeconds >= OFF_ROUTE_HOLD &&
-        this.simSeconds - this.lastReplanSeconds >= REPLAN_INTERVAL
-      ) {
-        const replanned = planRoute(
-          this.graph,
-          this.track.roads,
-          { position: this.car.position, heading: this.car.heading },
-          this.route.street,
-        );
-        this.lastReplanSeconds = this.simSeconds;
-        if (replanned) {
-          this.route = replanned;
-          this.routeProgress = { segmentIndex: 0 };
-          this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
-          this.offRouteSeconds = 0;
-        }
-      }
-    } else {
-      this.offRouteSeconds = 0;
+    const action = advanceNavigation(this.navTimers, this.lastGuidance, dt, this.simSeconds);
+    if (action === 'clear') {
+      this.clearRoute();
+      return;
     }
-
-    if (this.lastGuidance.remaining < 1) {
-      this.arriveSeconds += dt;
-      if (this.arriveSeconds >= ARRIVE_HOLD) {
-        this.clearRoute();
-        return;
+    if (action === 'replan') {
+      const replanned = planRoute(
+        this.graph,
+        this.track.roads,
+        { position: this.car.position },
+        this.route.street,
+      );
+      if (replanned) {
+        this.route = replanned;
+        this.routeProgress = { segmentIndex: 0 };
+        this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
+        this.navTimers.offRouteSeconds = 0;
       }
-    } else {
-      this.arriveSeconds = 0;
     }
 
     this.notifyNavigation();

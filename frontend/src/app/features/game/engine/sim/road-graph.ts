@@ -18,7 +18,7 @@ export interface RoadGraph {
   junction: Uint8Array;
 }
 
-function isRestricted(access: string): boolean {
+export function isRestricted(access: string): boolean {
   return access === 'private' || access === 'no';
 }
 
@@ -57,7 +57,11 @@ export function buildRoadGraph(roads: PolylineRoad[]): RoadGraph {
   for (let rid = 0; rid < roads.length; rid++) {
     const road = roads[rid];
     const pts = road.points;
-    if (pts.length < 2) continue;
+    // Keep roadNodeIds index-aligned with roads, so callers can index it by road id.
+    if (pts.length < 2) {
+      roadNodeIds.push([]);
+      continue;
+    }
 
     const ids: number[] = [];
     for (let i = 0; i < pts.length; i++) {

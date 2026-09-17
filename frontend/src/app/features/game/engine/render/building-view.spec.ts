@@ -4,7 +4,8 @@ import { createTrack } from '../sim/track';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import { BUILD_RADIUS, BuildingView, DROP_RADIUS } from './building-view';
 import { createBuildingTextures } from './building-textures';
-import * as detailKit from './detail-kit';
+import { PART_KINDS, planParts, PartKind } from './detail-kit';
+import { PropPool } from './prop-pool';
 
 const textures = () => createBuildingTextures(() => null);
 
@@ -94,7 +95,7 @@ describe('BuildingView', () => {
     const grid = new BuildingGrid(track.buildings);
     let planned = 0;
     const view = new BuildingView(track.buildings, textures(), (building) => {
-      const parts = detailKit.planParts(building);
+      const parts = planParts(building);
       planned += parts.length;
       return parts;
     });
@@ -105,9 +106,13 @@ describe('BuildingView', () => {
       view.update(x, z);
       const newlyBuilt = grid
         .tilesWithin(x, z, BUILD_RADIUS)
+        .filter((k) => {
+          const centre = grid.tileCentre(k);
+          return Math.hypot(centre.x - x, centre.z - z) <= BUILD_RADIUS;
+        })
         .filter((k) => !priorTiles.has(k));
       const expectedDelta = newlyBuilt.reduce(
-        (sum, k) => sum + grid.buildingsIn(k).reduce((n, b) => n + detailKit.planParts(b).length, 0),
+        (sum, k) => sum + grid.buildingsIn(k).reduce((n, b) => n + planParts(b).length, 0),
         0,
       );
       expect(planned - before).toBe(expectedDelta);
@@ -118,6 +123,70 @@ describe('BuildingView', () => {
     updateAndCheck(1010.8, -40.1);
     updateAndCheck(-1500, 800);
     expect(planned).toBeGreaterThan(0);
+    view.dispose();
+  });
+
+  it('writes exactly the planned part instances into the pools', () => {
+    const grid = new BuildingGrid(track.buildings);
+    const view = new BuildingView(track.buildings, textures());
+    view.update(310.8, -40.1);
+    const pools = (view as unknown as { pools: Map<PartKind, PropPool> }).pools;
+    for (const kind of PART_KINDS) {
+      let expected = 0;
+      for (const key of view.builtTiles) {
+        for (const building of grid.buildingsIn(key)) {
+          for (const part of planParts(building)) {
+            if (part.kind === kind) expected += 1;
+          }
+        }
+      }
+      expect(pools.get(kind)!.mesh.count).toBe(expected);
+      expect(pools.get(kind)!.mesh.visible).toBe(expected > 0);
+    }
+    view.dispose();
+  });
+
+  it('keeps pools consistent across build and drop waves', () => {
+    const grid = new BuildingGrid(track.buildings);
+    const view = new BuildingView(track.buildings, textures());
+    const positions: [number, number][] = [
+      [310.8, -40.1],
+      [1405, -379],
+      [2500, 1200],
+      [-1500, 800],
+    ];
+    const seen = new Set<string>();
+    for (const [x, z] of positions) {
+      view.update(x, z);
+      for (const key of view.builtTiles) seen.add(key);
+    }
+    expect(seen.size).toBeGreaterThan(0);
+
+    const pools = (view as unknown as { pools: Map<PartKind, PropPool> }).pools;
+    for (const kind of PART_KINDS) {
+      let expected = 0;
+      for (const key of view.builtTiles) {
+        for (const building of grid.buildingsIn(key)) {
+          for (const part of planParts(building)) {
+            if (part.kind === kind) expected += 1;
+          }
+        }
+      }
+      expect(pools.get(kind)!.mesh.count).toBe(expected);
+    }
+    view.dispose();
+  });
+
+  it('empties every pool when all tiles drop', () => {
+    const view = new BuildingView(track.buildings, textures());
+    view.update(310.8, -40.1);
+    view.update(9100, 0);
+    expect(view.builtTiles).toHaveLength(0);
+    const pools = (view as unknown as { pools: Map<PartKind, PropPool> }).pools;
+    for (const kind of PART_KINDS) {
+      expect(pools.get(kind)!.mesh.count).toBe(0);
+      expect(pools.get(kind)!.mesh.visible).toBe(false);
+    }
     view.dispose();
   });
 });

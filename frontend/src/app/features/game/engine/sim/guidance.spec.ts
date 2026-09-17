@@ -48,7 +48,7 @@ function crossroad(): Road[] {
 
 function drive(roads: Road[], car: CarState, street: string): ReturnType<typeof guide> {
   const graph = buildRoadGraph(roads);
-  const route = planRoute(graph, roads, { position: car.position, heading: car.heading }, street);
+  const route = planRoute(graph, roads, { position: car.position }, street);
   const progress: RouteProgress = { segmentIndex: 0 };
   return guide(route!, graph, car, progress);
 }
@@ -142,7 +142,7 @@ describe('guide', () => {
     const route = planRoute(
       graph,
       roads,
-      { position: { x: 0, z: -50 }, heading: 0 },
+      { position: { x: 0, z: -50 } },
       'Harbor',
     )!;
     const progress: RouteProgress = { segmentIndex: 0 };

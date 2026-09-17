@@ -10,7 +10,7 @@
   styleClass="street-select"
   (onChange)="onSelect($event.value)"
 >
-  <ng-template pTemplate="item" #item let-option>
+  <ng-template #item let-option>
     <div class="street-item">
       <span>{{ option.label }}</span>
       <div class="street-actions">

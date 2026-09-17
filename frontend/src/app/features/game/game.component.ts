@@ -42,6 +42,7 @@ export class GameComponent implements AfterViewInit, OnDestroy {
 
   private engine?: Engine;
   private destroyed = false;
+  private stopNavigationUpdates?: () => void;
 
   async ngAfterViewInit(): Promise<void> {
     this.engine = await Engine.create(
@@ -57,7 +58,9 @@ export class GameComponent implements AfterViewInit, OnDestroy {
     }
     this.streetSearch().setTrack(this.engine.track);
     this.carSelect().setCars(this.engine.cars, this.engine.activeCar);
-    this.engine.onNavigation((state) => this.navigationState.set(state));
+    this.stopNavigationUpdates = this.engine.onNavigation((state) =>
+      this.navigationState.set(state),
+    );
     this.engine.start();
   }
 
@@ -88,11 +91,13 @@ export class GameComponent implements AfterViewInit, OnDestroy {
   }
 
   formatDistance(meters: number): string {
+    if (meters < 1000) return `${Math.round(meters)} m`;
     return `${(meters / 1000).toFixed(1)} km`;
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.stopNavigationUpdates?.();
     this.engine?.dispose();
   }
 }

@@ -113,6 +113,15 @@ describe('buildRoadGraph', () => {
     expect(nodes!.length).toBe(3);
   });
 
+  it('keeps roadNodeIds aligned with roads when a road has fewer than two points', () => {
+    const stub = road('Stub', { points: [{ x: 500, z: 500 }] });
+    const graph = graphOf(stub, X_ROAD, Y_ROAD);
+    expect(graph.roadNodeIds).toHaveLength(3);
+    expect(graph.roadNodeIds[0]).toEqual([]);
+    expect(graph.roadNodeIds[1].map((id) => graph.nodes[id])).toEqual(X_ROAD.points);
+    expect(graph.nodesByStreet.get('Ystraße')).toHaveLength(3);
+  });
+
   it('merges vertices 0.1 m apart but not 1 m apart', () => {
     const graph = graphOf(
       road('A', { points: [{ x: 0, z: 0 }, { x: 0, z: 100 }] }),
