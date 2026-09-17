@@ -1,7 +1,34 @@
 <div #gameContainer class="viewport"></div>
 <div class="search-overlay">
-  <app-street-search (streetSelected)="onStreetSelected($event)" />
+  <app-street-search
+    (streetSelected)="onStreetSelected($event)"
+    (jump)="onJump($event)"
+    (navigate)="onNavigate($event)"
+  />
 </div>
 <div class="car-select-overlay">
   <app-car-select (carSelected)="onCarSelected($event)" />
 </div>
+@if (navigationState(); as state) {
+  <div class="nav-chip" [title]="state.street">
+    @if (state.maneuver === 'uturn') {
+      <span class="nav-icon">{{ maneuverIcon('uturn') }}</span>
+      <span class="nav-word">U-turn</span>
+    } @else if (state.nextStep; as next) {
+      <span class="nav-icon">{{ maneuverIcon(next.maneuver) }}</span>
+      @if (next.maneuver === 'arrive') {
+        <span class="nav-word">Arrive at {{ state.street }}</span>
+      } @else if (next.street) {
+        <span class="nav-word">{{ maneuverWord(next.maneuver) }} onto {{ next.street }}</span>
+      }
+      <span class="nav-distance">{{ formatDistance(next.distance) }}</span>
+    }
+    @if (state.nextStep?.maneuver !== 'arrive') {
+      <span class="nav-remaining">· {{ formatDistance(state.remaining) }}</span>
+    }
+    <button class="nav-cancel" (click)="cancelNavigation()">×</button>
+  </div>
+}
+@if (noRoute()) {
+  <div class="no-route-message">No route found.</div>
+}

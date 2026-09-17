@@ -71,6 +71,7 @@ export class BuildingView {
   private readonly pools = new Map<PartKind, PropPool>();
   private readonly tiles = new Map<string, THREE.Mesh[]>();
   private readonly tileParts = new Map<string, Map<PartKind, PartInstance[]>>();
+  private readonly poolSpans = new Map<PartKind, Map<string, { start: number; count: number }>>();
   private readonly plan: (building: Building) => PartPlacement[];
 
   constructor(
@@ -126,6 +127,7 @@ export class BuildingView {
       pool.mesh.visible = false;
       this.pools.set(kind, pool);
       this.group.add(pool.mesh);
+      this.poolSpans.set(kind, new Map());
     }
   }
 
@@ -168,6 +170,12 @@ export class BuildingView {
       this.group.add(mesh);
       meshes.push(mesh);
     }
+    for (const [kind, instances] of partsByKind) {
+      const pool = this.pools.get(kind)!;
+      const start = pool.append(instances.map((instance) => instance.matrix));
+      this.poolSpans.get(kind)!.set(key, { start, count: instances.length });
+      pool.mesh.visible = pool.mesh.count > 0;
+    }
     this.tiles.set(key, meshes);
     this.tileParts.set(key, partsByKind);
   }
@@ -175,6 +183,24 @@ export class BuildingView {
   private dropTile(key: string): void {
     const meshes = this.tiles.get(key);
     if (!meshes) return;
+    const partsByKind = this.tileParts.get(key);
+    if (partsByKind) {
+      for (const kind of partsByKind.keys()) {
+        const pool = this.pools.get(kind)!;
+        const spans = this.poolSpans.get(kind)!;
+        const span = spans.get(key);
+        if (!span) continue;
+        const removed = span.count;
+        pool.removeRange(span.start, removed);
+        for (const [other, displaced] of spans) {
+          if (other !== key && displaced.start >= span.start + removed) {
+            displaced.start -= removed;
+          }
+        }
+        spans.delete(key);
+        pool.mesh.visible = pool.mesh.count > 0;
+      }
+    }
     for (const mesh of meshes) {
       this.group.remove(mesh);
       mesh.geometry.dispose();
@@ -183,35 +209,12 @@ export class BuildingView {
     this.tileParts.delete(key);
   }
 
-  private rebuildParts(): void {
-    const instancesByKind = new Map<PartKind, PartInstance[]>();
-    for (const partsByKind of this.tileParts.values()) {
-      for (const [kind, instances] of partsByKind) {
-        const bucket = instancesByKind.get(kind);
-        if (bucket) {
-          for (const instance of instances) bucket.push(instance);
-        } else {
-          instancesByKind.set(kind, [...instances]);
-        }
-      }
-    }
-
-    for (const kind of PART_KINDS) {
-      const pool = this.pools.get(kind)!;
-      const instances = instancesByKind.get(kind) ?? [];
-      pool.write(instances);
-      pool.mesh.visible = instances.length > 0;
-    }
-  }
-
   update(carX: number, carZ: number): void {
-    const within = this.grid.tilesWithin(carX, carZ, BUILD_RADIUS);
-    let changed = false;
-    for (const key of within) {
-      if (!this.tiles.has(key)) {
-        this.buildTile(key);
-        changed = true;
-      }
+    for (const key of this.grid.tilesWithin(carX, carZ, BUILD_RADIUS)) {
+      if (this.tiles.has(key)) continue;
+      const centre = this.grid.tileCentre(key);
+      if (Math.hypot(centre.x - carX, centre.z - carZ) > BUILD_RADIUS) continue;
+      this.buildTile(key);
     }
 
     const toDrop: string[] = [];
@@ -220,12 +223,7 @@ export class BuildingView {
       const distance = Math.hypot(centre.x - carX, centre.z - carZ);
       if (distance > DROP_RADIUS) toDrop.push(key);
     }
-    if (toDrop.length > 0) {
-      for (const key of toDrop) this.dropTile(key);
-      changed = true;
-    }
-
-    if (changed) this.rebuildParts();
+    for (const key of toDrop) this.dropTile(key);
   }
 
   dispose(): void {
@@ -237,6 +235,7 @@ export class BuildingView {
     }
     this.tiles.clear();
     this.tileParts.clear();
+    this.poolSpans.clear();
 
     for (const material of this.materials.values()) {
       material.dispose();
