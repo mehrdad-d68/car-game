@@ -15,7 +15,7 @@ import { BackendPropSource } from './adapters/backend-prop-source';
 import { BackendTrackSource } from './adapters/backend-track-source';
 import { KeyboardInput } from './adapters/keyboard-input';
 import { CarSelectComponent } from './car-select/car-select.component';
-import { Engine, NavigationState } from './engine';
+import { Engine, NavigationState, StepManeuver } from './engine';
 import { CarSpec } from './engine/sim/car-spec';
 import {
   StreetOption,
@@ -93,6 +93,36 @@ export class GameComponent implements AfterViewInit, OnDestroy {
   formatDistance(meters: number): string {
     if (meters < 1000) return `${Math.round(meters)} m`;
     return `${(meters / 1000).toFixed(1)} km`;
+  }
+
+  maneuverIcon(maneuver: StepManeuver | undefined): string {
+    switch (maneuver) {
+      case 'left':
+        return '↰';
+      case 'right':
+        return '↱';
+      case 'uturn':
+        return '⤺';
+      case 'arrive':
+        return '⚑';
+      default:
+        return '↑';
+    }
+  }
+
+  maneuverWord(maneuver: StepManeuver): string {
+    switch (maneuver) {
+      case 'left':
+        return 'Left';
+      case 'right':
+        return 'Right';
+      case 'uturn':
+        return 'U-turn';
+      case 'arrive':
+        return 'Arrive';
+      default:
+        return '';
+    }
   }
 
   ngOnDestroy(): void {

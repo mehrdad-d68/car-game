@@ -31,12 +31,10 @@ describe('advanceNavigation', () => {
   it('clears the route once the car has been arriving for the hold time', () => {
     const { actions } = run(arriving, ARRIVE_HOLD + 1);
     expect(actions).toContain('clear');
-    // Not before the hold has actually elapsed.
     expect(actions.indexOf('clear')).toBe(ARRIVE_HOLD / 0.5 - 1);
   });
 
   it('clears when the car stops at the destination rather than driving past it', () => {
-    // The arrow says "arrive" from 15 m out; the car stops there and never gets closer.
     const timers = createNavigationTimers();
     let action = 'hold';
     for (let i = 1; i <= (ARRIVE_HOLD + 1) / 0.5; i++) {
@@ -60,7 +58,6 @@ describe('advanceNavigation', () => {
   });
 
   it('asks for a replan only after the off-route hold has elapsed', () => {
-    // 0.5 is exact in binary, so the step that crosses OFF_ROUTE_HOLD lands precisely on it.
     const step = 0.5;
     const steps = OFF_ROUTE_HOLD / step;
     const timers = createNavigationTimers();
@@ -80,7 +77,6 @@ describe('advanceNavigation', () => {
     for (let i = 1; i <= seconds / step; i++) {
       if (advanceNavigation(timers, lost, step, i * step) === 'replan') replans++;
     }
-    // One replan after the hold, then at most one per REPLAN_INTERVAL for the rest of the run.
     expect(replans).toBeGreaterThan(0);
     expect(replans).toBeLessThanOrEqual(Math.ceil((seconds - OFF_ROUTE_HOLD) / REPLAN_INTERVAL) + 1);
   });

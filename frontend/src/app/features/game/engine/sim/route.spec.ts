@@ -23,7 +23,7 @@ describe('planRoute output', () => {
       { name: 'A', type: 'residential', lanes: 2, width: 8, oneway: 0 as const, access: 'yes', points: [{ x: 0, z: 0 }, { x: 100, z: 0 }] },
     ];
     const graph = buildRoadGraph(roads);
-    const route = planRoute(graph, roads, { position: { x: 10, z: 0 } }, 'A')!;
+    const route = planRoute(graph, roads, { position: { x: 10, z: 0 }, heading: 0 }, 'A')!;
     const before = graph.nodes.map((n) => ({ ...n }));
     for (const p of route.points) p.x += 1000;
     expect(graph.nodes).toEqual(before);
@@ -31,7 +31,7 @@ describe('planRoute output', () => {
 });
 
 function at(x: number, z: number): RouteStart {
-  return { position: { x, z } };
+  return { position: { x, z }, heading: 0 };
 }
 
 const DIAMOND: PolylineRoad[] = [

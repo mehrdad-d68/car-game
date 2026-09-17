@@ -15,11 +15,6 @@ export class PropPool {
   ) {
     this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
     this.mesh.count = 0;
-    // This mesh spans the whole streamed radius around the car, so its bounding sphere
-    // almost always intersects the view frustum anyway. Frustum culling it buys nothing,
-    // but three.js recomputes that sphere by iterating every active instance whenever it's
-    // null (see commit()) — for the window pool that's up to ~150k instances, right inside
-    // render(). Skip the check entirely instead of paying for it every time a tile changes.
     this.mesh.frustumCulled = false;
   }
 
@@ -33,7 +28,6 @@ export class PropPool {
     for (let i = 0; i < instances.length; i++) {
       this.mesh.setMatrixAt(i, instances[i].matrix);
     }
-    // A full replace: every instance may have moved, so upload it all.
     this.mesh.instanceMatrix.needsUpdate = true;
     this.setCount(instances.length);
   }
@@ -50,8 +44,6 @@ export class PropPool {
     for (let i = 0; i < n; i++) {
       this.mesh.setMatrixAt(start + i, matrices[i]);
     }
-    // Without an explicit range, three.js re-uploads the whole buffer (up to capacity) on
-    // every commit, regardless of how little changed. Scope the GPU upload to what moved.
     if (n > 0) {
       this.mesh.instanceMatrix.addUpdateRange(start * 16, n * 16);
       this.mesh.instanceMatrix.needsUpdate = true;
@@ -70,8 +62,6 @@ export class PropPool {
     for (let i = 0; i < above; i++) {
       this.mesh.setMatrixAt(start + i, this.mesh.getMatrixAt(start + count + i, this.scratch));
     }
-    // If the removed range was the tail, nothing shifted and there is nothing to re-upload —
-    // only mesh.count needs to shrink, which costs nothing on the GPU side.
     if (above > 0) {
       this.mesh.instanceMatrix.addUpdateRange(start * 16, above * 16);
       this.mesh.instanceMatrix.needsUpdate = true;

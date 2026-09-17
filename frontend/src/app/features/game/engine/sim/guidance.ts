@@ -1,5 +1,5 @@
-import { RoadGraph } from './road-graph';
 import { Route } from './route';
+import type { RouteStep } from './route-steps';
 import { CarState, Vec2 } from './types';
 
 export type Maneuver = 'straight' | 'left' | 'right' | 'uturn' | 'arrive';
@@ -7,8 +7,11 @@ export type Maneuver = 'straight' | 'left' | 'right' | 'uturn' | 'arrive';
 export interface Guidance {
   maneuver: Maneuver;
   distanceToManeuver: number;
-  aimX: number;
-  aimZ: number;
+  distanceToStep: number;
+  arrowYaw: number;
+  arrowX: number;
+  arrowZ: number;
+  nextStep: RouteStep | null;
   offRoute: boolean;
   remaining: number;
 }
@@ -17,11 +20,10 @@ export interface RouteProgress {
   segmentIndex: number;
 }
 
-const TURN_ANGLE = Math.PI / 6;
-const U_TURN_ANGLE = (5 * Math.PI) / 6;
 const U_TURN_CAR = (2 * Math.PI) / 3;
-const MANEUVER_DISTANCE = 60;
-const AIM_DISTANCE = 20;
+export const MANEUVER_DISTANCE = 60;
+export const TURN_SHOW_DISTANCE = 30;
+const ARROW_AHEAD = 8;
 const ARRIVE_DISTANCE = 15;
 const OFF_ROUTE_LATERAL = 25;
 const SEGMENTS_AHEAD = 8;
@@ -44,6 +46,10 @@ function segmentDirection(points: Vec2[], index: number): Vec2 | null {
     return { x: dx / len, z: dz / len };
   }
   return null;
+}
+
+function toYaw(direction: Vec2): number {
+  return Math.atan2(direction.x, direction.z);
 }
 
 function pointAtDistance(
@@ -69,14 +75,25 @@ function pointAtDistance(
   };
 }
 
+function segmentIndexAt(
+  points: Vec2[],
+  cumulative: number[],
+  along: number,
+): number {
+  for (let i = 0; i < points.length - 1; i++) {
+    if (along <= cumulative[i + 1] + 1e-6) return i;
+  }
+  return points.length - 2;
+}
+
 export function guide(
   route: Route,
-  graph: RoadGraph,
   car: CarState,
   progress: RouteProgress,
 ): Guidance {
   const points = route.points;
   const cumulative = route.cumulative;
+  const steps = route.steps;
   const lastSegment = points.length - 2;
 
   let start = progress.segmentIndex;
@@ -114,80 +131,78 @@ export function guide(
 
   const end = points[points.length - 1];
   const distanceToEnd = Math.hypot(car.position.x - end.x, car.position.z - end.z);
+
+  let nextStep: RouteStep | null = null;
+  for (const step of steps) {
+    if (step.maneuver === 'depart') continue;
+    if (step.at >= distAlong) {
+      nextStep = step;
+      break;
+    }
+  }
+  if (!nextStep && steps.length > 0) nextStep = steps[steps.length - 1];
+  const distanceToStep = nextStep ? Math.max(0, nextStep.at - distAlong) : remaining;
+
+  const carForward: Vec2 = { x: -Math.sin(car.heading), z: -Math.cos(car.heading) };
+  const streetDir = segmentDirection(points, bestSi);
+  const arrowPoint = pointAtDistance(points, cumulative, distAlong, ARROW_AHEAD);
+
   if (distanceToEnd <= ARRIVE_DISTANCE) {
     return {
       maneuver: 'arrive',
       distanceToManeuver: remaining,
-      aimX: end.x,
-      aimZ: end.z,
+      distanceToStep,
+      arrowYaw: streetDir ? toYaw(streetDir) : 0,
+      arrowX: end.x,
+      arrowZ: end.z,
+      nextStep,
       offRoute,
       remaining,
     };
   }
 
-  const carForward: Vec2 = { x: -Math.sin(car.heading), z: -Math.cos(car.heading) };
-  const routeDirection = segmentDirection(points, bestSi);
-  if (routeDirection && angleBetween(carForward, routeDirection) > U_TURN_CAR) {
-    const aim = pointAtDistance(points, cumulative, distAlong, AIM_DISTANCE);
+  if (streetDir && angleBetween(carForward, streetDir) > U_TURN_CAR) {
     return {
       maneuver: 'uturn',
       distanceToManeuver: 0,
-      aimX: aim.x,
-      aimZ: aim.z,
+      distanceToStep,
+      arrowYaw: toYaw(streetDir),
+      arrowX: car.position.x + carForward.x * ARROW_AHEAD,
+      arrowZ: car.position.z + carForward.z * ARROW_AHEAD,
+      nextStep,
       offRoute,
       remaining,
     };
   }
 
-  const loopStart = Math.max(1, bestSi);
-  for (let k = loopStart; k < points.length - 1; k++) {
-    const distance = cumulative[k] - distAlong;
-    if (distance > MANEUVER_DISTANCE) break;
-    if (graph.junction[route.nodes[k - 1]]) {
-      const incoming = segmentDirection(points, k - 1);
-      const outgoing = segmentDirection(points, k);
-      if (incoming && outgoing) {
-        const cross = incoming.x * outgoing.z - incoming.z * outgoing.x;
-        const dot = clamp(incoming.x * outgoing.x + incoming.z * outgoing.z, -1, 1);
-        const absAngle = Math.acos(dot);
-        if (absAngle > TURN_ANGLE) {
-          if (distance <= 0) {
-            const angleFromOutgoing = angleBetween(carForward, outgoing);
-            if (angleFromOutgoing > TURN_ANGLE) {
-              const aim = pointAtDistance(points, cumulative, distAlong, AIM_DISTANCE);
-              return {
-                maneuver: 'uturn',
-                distanceToManeuver: 0,
-                aimX: aim.x,
-                aimZ: aim.z,
-                offRoute,
-                remaining,
-              };
-            }
-            continue;
-          }
-          const maneuver: Maneuver =
-            absAngle >= U_TURN_ANGLE ? 'uturn' : cross > 0 ? 'right' : 'left';
-          const aim = pointAtDistance(points, cumulative, distAlong, AIM_DISTANCE);
-          return {
-            maneuver,
-            distanceToManeuver: distance,
-            aimX: aim.x,
-            aimZ: aim.z,
-            offRoute,
-            remaining,
-          };
-        }
-      }
-    }
+  const isTurn =
+    nextStep !== null &&
+    (nextStep.maneuver === 'left' ||
+      nextStep.maneuver === 'right' ||
+      nextStep.maneuver === 'uturn');
+
+  let maneuver: Maneuver = 'straight';
+  if (isTurn && distanceToStep <= MANEUVER_DISTANCE) {
+    maneuver = nextStep!.maneuver as Maneuver;
   }
 
-  const aim = pointAtDistance(points, cumulative, distAlong, AIM_DISTANCE);
+  let arrowYaw = toYaw(
+    segmentDirection(points, segmentIndexAt(points, cumulative, distAlong + ARROW_AHEAD)) ??
+      streetDir ??
+      carForward,
+  );
+  if (maneuver !== 'straight' && distanceToStep <= TURN_SHOW_DISTANCE) {
+    arrowYaw = nextStep!.outYaw;
+  }
+
   return {
-    maneuver: 'straight',
-    distanceToManeuver: 0,
-    aimX: aim.x,
-    aimZ: aim.z,
+    maneuver,
+    distanceToManeuver: distanceToStep,
+    distanceToStep,
+    arrowYaw,
+    arrowX: arrowPoint.x,
+    arrowZ: arrowPoint.z,
+    nextStep,
     offRoute,
     remaining,
   };

@@ -57,7 +57,6 @@ export function buildRoadGraph(roads: PolylineRoad[]): RoadGraph {
   for (let rid = 0; rid < roads.length; rid++) {
     const road = roads[rid];
     const pts = road.points;
-    // Keep roadNodeIds index-aligned with roads, so callers can index it by road id.
     if (pts.length < 2) {
       roadNodeIds.push([]);
       continue;

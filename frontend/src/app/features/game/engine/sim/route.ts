@@ -1,9 +1,12 @@
 import { isRestricted, RoadGraph } from './road-graph';
+import { buildSteps } from './route-steps';
+import type { RouteStep } from './route-steps';
 import { PolylineRoad, projectOntoRoad } from './track';
 import { Vec2 } from './types';
 
 export interface RouteStart {
   position: Vec2;
+  heading: number;
 }
 
 export interface Route {
@@ -12,6 +15,8 @@ export interface Route {
   length: number;
   street: string;
   cumulative: number[];
+  roads: number[];
+  steps: RouteStep[];
 }
 
 interface HeapEntry {
@@ -141,6 +146,16 @@ function nearestAllowedSegment(
   return best;
 }
 
+const ENDPOINT_TOLERANCE = 0.01;
+
+function seedEndpointAt(graph: RoadGraph, seed: NearestSegment, segA: number, segB: number): number {
+  for (const node of [segA, segB]) {
+    const p = graph.nodes[node];
+    if (Math.hypot(p.x - seed.projX, p.z - seed.projZ) <= ENDPOINT_TOLERANCE) return node;
+  }
+  return -1;
+}
+
 function bboxDistanceTo(node: Vec2, minX: number, minZ: number, maxX: number, maxZ: number): number {
   const dx = node.x < minX ? minX - node.x : node.x > maxX ? node.x - maxX : 0;
   const dz = node.z < minZ ? minZ - node.z : node.z > maxZ ? node.z - maxZ : 0;
@@ -194,6 +209,8 @@ export function planRoute(
   dist.fill(Infinity);
   const cameFrom = new Int32Array(n);
   cameFrom.fill(-1);
+  const cameFromRoad = new Int32Array(n);
+  cameFromRoad.fill(-1);
   const heap = new MinHeap();
 
   const heuristic = (node: number): number => {
@@ -218,7 +235,8 @@ export function planRoute(
         prev = cameFrom[prev];
       }
       const nodes = reversed.reverse();
-      // Copy, don't alias: the graph's nodes are shared by every route planned after this one.
+      const startNode = seedEndpointAt(graph, seed, segA, segB);
+      if (startNode !== -1 && nodes[0] !== startNode) nodes.unshift(startNode);
       const points: Vec2[] = [{ x: seed.projX, z: seed.projZ }];
       for (const node of nodes) {
         points.push({ x: graph.nodes[node].x, z: graph.nodes[node].z });
@@ -232,13 +250,21 @@ export function planRoute(
             Math.hypot(b.x - a.x, b.z - a.z),
         );
       }
-      return {
+      const roadIds: number[] = new Array(nodes.length).fill(seed.roadIdx);
+      for (let i = 1; i < nodes.length; i++) {
+        if (cameFromRoad[nodes[i]] >= 0) roadIds[i] = cameFromRoad[nodes[i]];
+      }
+      const planned: Route = {
         points,
         nodes,
         length: cumulative[cumulative.length - 1],
         street,
         cumulative,
+        roads: roadIds,
+        steps: [],
       };
+      planned.steps = buildSteps(planned, graph, roads, from.heading);
+      return planned;
     }
 
     for (const edge of graph.out[current.node]) {
@@ -247,6 +273,7 @@ export function planRoute(
       if (g2 < dist[edge.to]) {
         dist[edge.to] = g2;
         cameFrom[edge.to] = current.node;
+        cameFromRoad[edge.to] = edge.road;
         heap.push({ node: edge.to, g: g2, f: g2 + heuristic(edge.to) });
       }
     }

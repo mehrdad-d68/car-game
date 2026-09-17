@@ -15,6 +15,7 @@ import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
 import { Viewport } from './render/viewport';
 import { CarModel, CarSpec } from './sim/car-spec';
+import type { StepManeuver } from './sim/route-steps';
 import { Guidance, guide, RouteProgress } from './sim/guidance';
 import { MapItemKind } from './sim/osm-types';
 import { PropSpec } from './sim/prop-spec';
@@ -31,11 +32,18 @@ const NOTIFY_INTERVAL = 0.25;
 
 export type NavigateResult = 'ok' | 'no-route';
 
+export interface NavigationNextStep {
+  maneuver: StepManeuver;
+  street: string;
+  distance: number;
+}
+
 export interface NavigationState {
   street: string;
   remaining: number;
   maneuver: Guidance['maneuver'];
   distanceToManeuver: number;
+  nextStep: NavigationNextStep | null;
 }
 
 export class Engine {
@@ -237,7 +245,7 @@ export class Engine {
     const route = planRoute(
       this.graph,
       this.track.roads,
-      { position: this.car.position },
+      { position: this.car.position, heading: this.car.heading },
       street,
     );
     if (!route) {
@@ -245,7 +253,7 @@ export class Engine {
     }
     this.route = route;
     this.routeProgress = { segmentIndex: 0 };
-    this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
+    this.lastGuidance = guide(this.route, this.car, this.routeProgress);
     this.navTimers = createNavigationTimers();
     this.lastNotifySeconds = this.simSeconds - NOTIFY_INTERVAL;
     this.emitNavigation();
@@ -277,7 +285,7 @@ export class Engine {
       return;
     }
 
-    this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
+    this.lastGuidance = guide(this.route, this.car, this.routeProgress);
 
     const action = advanceNavigation(this.navTimers, this.lastGuidance, dt, this.simSeconds);
     if (action === 'clear') {
@@ -288,13 +296,13 @@ export class Engine {
       const replanned = planRoute(
         this.graph,
         this.track.roads,
-        { position: this.car.position },
+        { position: this.car.position, heading: this.car.heading },
         this.route.street,
       );
       if (replanned) {
         this.route = replanned;
         this.routeProgress = { segmentIndex: 0 };
-        this.lastGuidance = guide(this.route, this.graph, this.car, this.routeProgress);
+        this.lastGuidance = guide(this.route, this.car, this.routeProgress);
         this.navTimers.offRouteSeconds = 0;
       }
     }
@@ -315,11 +323,19 @@ export class Engine {
     if (this.navListeners.size === 0 || !this.route || !this.lastGuidance) {
       return;
     }
+    const next = this.lastGuidance.nextStep;
     const state: NavigationState = {
       street: this.route.street,
       remaining: this.lastGuidance.remaining,
       maneuver: this.lastGuidance.maneuver,
       distanceToManeuver: this.lastGuidance.distanceToManeuver,
+      nextStep: next
+        ? {
+            maneuver: next.maneuver,
+            street: next.street,
+            distance: this.lastGuidance.distanceToStep,
+          }
+        : null,
     };
     for (const listener of this.navListeners) {
       listener(state);

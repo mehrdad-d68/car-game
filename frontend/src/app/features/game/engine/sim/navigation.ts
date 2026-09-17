@@ -39,9 +39,6 @@ export function advanceNavigation(
     timers.offRouteSeconds = 0;
   }
 
-  // Tear down on the same signal the arrow shows the player. A tighter distance check would
-  // leave the route running for anyone who stops where the arrow told them to, because the
-  // remaining distance only reaches zero if they drive past the destination.
   if (guidance.maneuver === 'arrive') {
     timers.arriveSeconds += dt;
     if (timers.arriveSeconds >= ARRIVE_HOLD) return 'clear';
