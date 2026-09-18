@@ -1,4 +1,4 @@
-import { MapItem, OSMMapData, StationItem } from './osm-types';
+import { MapItem, OSMMapData, OSMMeta, StationItem } from './osm-types';
 import { Building, createBuildings } from './buildings';
 import { nodeHash } from './node-key';
 import { Vec2 } from './types';
@@ -130,6 +130,7 @@ export interface MapFeatures {
 }
 
 export interface TrackData {
+  meta: OSMMeta;
   roads: PolylineRoad[];
   bounds: TrackBounds;
   spawn: Spawn;
@@ -407,6 +408,7 @@ export function createTrack(osmData: OSMMapData): TrackData {
   };
 
   return {
+    meta: osmData.meta,
     roads,
     bounds: {
       minX: minX - padding,

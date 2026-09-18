@@ -1,0 +1,63 @@
+@if (enabled) {
+  <div
+    class="inspector-overlay"
+    [class.active]="active()"
+    (click)="onContainerClick($event)"
+  >
+    <button
+      class="inspector-toggle"
+      (click)="toggle(); $event.stopPropagation()"
+    >
+      {{ active() ? 'Inspect: click to pin ( ` )' : 'Inspect ( ` )' }}
+    </button>
+
+    @if (active()) {
+      <div class="inspector-panel" (click)="$event.stopPropagation()">
+        <div class="inspector-head">
+          <span>Map inspector</span>
+          <span class="inspector-head-actions">
+            <button (click)="copyPins(pins())">Copy all</button>
+            <button (click)="toggle()">Close</button>
+          </span>
+        </div>
+
+        <form
+          class="go-form"
+          (ngSubmit)="onGoToSubmit(); $event.stopPropagation()"
+        >
+          <input
+            [(ngModel)]="goToText"
+            name="goTo"
+            placeholder="x z or lat,lng"
+            autocomplete="off"
+          />
+          <button type="submit">Go</button>
+        </form>
+        @if (goToError()) {
+          <div class="go-error">Enter "x z" or "lat,lng"</div>
+        }
+
+        <div class="inspector-actions">
+          <button (click)="copyPins(pins())">Copy all</button>
+        </div>
+
+        <div class="pins">
+          @for (pin of pins(); track pin.n) {
+            <div class="pin-card">
+              <div class="pin-head">
+                <span class="pin-num">{{ pin.n }}</span>
+                <span class="pin-actions">
+                  <button (click)="goPin(pin)">Go</button>
+                  <button (click)="copyPins([pin])">Copy</button>
+                </span>
+              </div>
+              <pre class="pin-text">{{ pin.text }}</pre>
+            </div>
+          } @empty {
+            <div class="no-pins">Click the map to drop a pin.</div>
+          }
+        </div>
+      </div>
+    }
+  </div>
+}

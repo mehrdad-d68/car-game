@@ -30,6 +30,27 @@ describe('FixedStepLoop', () => {
     expect(alpha).toBeCloseTo(0.5, 5);
   });
 
+  it('leaves the car untouched while paused and never accumulates time', () => {
+    const start = createCarState();
+    let state = start;
+    const loop = new FixedStepLoop(
+      (dt) => (state = stepVehicle(state, { throttle: 1, steer: 1, brake: false }, dt)),
+      1 / 60,
+    );
+    loop.paused = true;
+
+    loop.advance(1 / 30);
+    const fps1 = { ...state, position: { ...state.position }, heading: state.heading };
+
+    loop.advance(30);
+    const capt = { ...state, position: { ...state.position }, heading: state.heading };
+
+    expect(capt.position.x).toBe(fps1.position.x);
+    expect(capt.position.z).toBe(fps1.position.z);
+    expect(capt.heading).toBe(fps1.heading);
+    expect(capt.position.x).toBe(start.position.x);
+  });
+
   it('lands the car in the same place regardless of frame pacing', () => {
     const driveForTwoSeconds = (fps: number) => {
       let state = createCarState();

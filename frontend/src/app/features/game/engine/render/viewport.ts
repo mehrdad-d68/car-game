@@ -8,6 +8,10 @@ const MAX_PIXEL_RATIO = 1.5;
 export class Viewport {
   readonly renderer: THREE.WebGLRenderer;
 
+  get domElement(): HTMLCanvasElement {
+    return this.renderer.domElement;
+  }
+
   private readonly observer: ResizeObserver;
   private composer: EffectComposer | null = null;
   private outlinePass: ShaderPass | null = null;

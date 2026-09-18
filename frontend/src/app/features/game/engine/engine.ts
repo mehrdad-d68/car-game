@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { FixedStepLoop } from './loop';
 import { CarSource, InputSource, PropSource, TrackSource } from './ports';
-import { CameraRig } from './render/camera-rig';
 import { BuildingView } from './render/building-view';
+import { CameraRig } from './render/camera-rig';
 import { createBuildingTextures } from './render/building-textures';
 import { CarView } from './render/car-view';
+import { DebugPins, Pin } from './render/debug-pins';
+import type { PartKind } from './render/detail-kit';
 import { FeatureView } from './render/feature-view';
 import { clearModelCache, disposeModel, loadCarModel } from './render/model-loader';
+import { firstHit, groundPoint } from './render/picker';
 import { loadPresentModels, presentPropKinds } from './render/prop-models';
 import { compileMaterials } from './render/prepare-scene';
 import { RouteArrow } from './render/route-arrow';
@@ -15,6 +18,8 @@ import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
 import { Viewport } from './render/viewport';
 import { CarModel, CarSpec } from './sim/car-spec';
+import { inspectPoint, formatReport, nearestRoadHeading } from './sim/inspect';
+import type { InspectReport, ReportExtras } from './sim/inspect';
 import type { StepManeuver } from './sim/route-steps';
 import { Guidance, guide, RouteProgress } from './sim/guidance';
 import { MapItemKind } from './sim/osm-types';
@@ -25,10 +30,22 @@ import { planRoute, Route } from './sim/route';
 import { TrackData } from './sim/track';
 import { CarState } from './sim/types';
 import { createCarState, interpolateCarState, stepVehicle } from './sim/vehicle';
+import { ROAD_HEIGHT } from './render/constants';
 
 const LIGHT_OFFSET = new THREE.Vector3(50, 80, 30);
 const DEFAULT_CAR_ID = 'coupe';
 const NOTIFY_INTERVAL = 0.25;
+const MAX_PINS = 9;
+
+const FEATURE_LABELS: Record<MapItemKind, string> = {
+  trafficLight: 'traffic light',
+  pedestrianCrossing: 'crossing',
+  busStop: 'bus stop',
+  gasStation: 'gas station',
+  fireStation: 'fire station',
+  hospital: 'hospital',
+  policeStation: 'police station',
+};
 
 export type NavigateResult = 'ok' | 'no-route';
 
@@ -65,6 +82,12 @@ export class Engine {
 
   private car: CarState;
   private previousCar: CarState;
+
+  private inspectActive = false;
+  private lastPinIndex = 0;
+  private pinHit: string | null = null;
+  private readonly debugPins = new DebugPins();
+  private readonly pinRecords = new Map<number, { text: string; x: number; z: number }>();
 
   private readonly graph: RoadGraph;
   private readonly routeArrow: RouteArrow;
@@ -126,6 +149,7 @@ export class Engine {
       this.buildingView.group,
       this.carView.group,
       this.routeArrow.group,
+      this.debugPins.group,
     );
 
     this.viewport = new Viewport(container, (aspect) =>
@@ -216,7 +240,9 @@ export class Engine {
     const drawn = interpolateCarState(this.previousCar, this.car, alpha);
 
     this.carView.sync(drawn);
-    this.rig.follow(drawn, frameDelta);
+    if (!this.inspectActive) {
+      this.rig.follow(drawn, frameDelta);
+    }
     this.trackView.updateLabels(drawn.position.x, drawn.position.z);
     this.featureView.update(drawn.position.x, drawn.position.z);
     this.buildingView.update(drawn.position.x, drawn.position.z);
@@ -231,6 +257,152 @@ export class Engine {
     this.lights.sun.target.updateMatrixWorld();
 
     this.viewport.render(this.scene, this.rig.camera);
+  }
+
+  get inspectMode(): boolean {
+    return this.inspectActive;
+  }
+
+  setInspectMode(on: boolean): void {
+    this.inspectActive = on;
+    this.loop.paused = on;
+    if (!on) {
+      this.pinHit = null;
+      this.lastPinIndex = 0;
+      this.pinRecords.clear();
+      this.debugPins.set([]);
+    }
+  }
+
+  inspectAt(clientX: number, clientY: number): { report: InspectReport; hit: string | null } | null {
+    if (!this.inspectActive) return null;
+    if (this.pinRecords.size >= MAX_PINS) return null;
+
+    const rect = this.viewport.domElement.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = -((clientY - rect.top) / rect.height) * 2 + 1;
+
+    const point = groundPoint(this.rig.camera, ndcX, ndcY, ROAD_HEIGHT);
+    if (!point) return null;
+
+    const report = inspectPoint(this.track, this.graph, point.x, point.z);
+    const hit = this.describeHit(ndcX, ndcY);
+    this.pinHit = hit;
+
+    const pin = this.lastPinIndex + 1;
+    this.lastPinIndex = pin;
+    this.pinRecords.set(pin, {
+      text: formatReport(pin, report, this.buildExtras()),
+      x: report.x,
+      z: report.z,
+    });
+    const pins: Pin[] = [];
+    for (const [n, record] of this.pinRecords) {
+      pins.push({ n, x: record.x, z: record.z });
+    }
+    this.debugPins.set(pins);
+
+    return { report, hit };
+  }
+
+  reportText(pin: number): string | null {
+    return this.pinRecords.get(pin)?.text ?? null;
+  }
+
+  pinPosition(pin: number): { x: number; z: number } {
+    const record = this.pinRecords.get(pin);
+    return record ? { x: record.x, z: record.z } : { x: 0, z: 0 };
+  }
+
+  clearPins(): void {
+    this.lastPinIndex = 0;
+    this.pinHit = null;
+    this.pinRecords.clear();
+    this.debugPins.set([]);
+  }
+
+  get pinCount(): number {
+    return this.pinRecords.size;
+  }
+
+  goTo(x: number, z: number): void {
+    this.clearPins();
+    this.setInspectMode(false);
+    this.teleportTo(x, z, nearestRoadHeading(this.track, x, z));
+  }
+
+  private buildExtras(): ReportExtras {
+    let route: ReportExtras['route'] = null;
+    if (this.route && this.lastGuidance) {
+      route = {
+        street: this.route.street,
+        remaining: this.lastGuidance.remaining,
+        next: this.lastGuidance.nextStep
+          ? {
+              maneuver: this.lastGuidance.nextStep.maneuver,
+              street: this.lastGuidance.nextStep.street,
+              distance: this.lastGuidance.distanceToStep,
+            }
+          : null,
+      };
+    }
+    return {
+      hit: this.pinHit,
+      car: { ...this.car, position: { x: this.car.position.x, z: this.car.position.z } },
+      route,
+      map: `${this.track.meta.source} generated ${String(this.track.meta.generatedAt)}`,
+    };
+  }
+
+  private describeHit(ndcX: number, ndcY: number): string | null {
+    const hit = firstHit(this.rig.camera, ndcX, ndcY, [
+      this.trackView.group,
+      this.featureView.group,
+      this.buildingView.group,
+      this.carView.group,
+    ]);
+    if (!hit) return null;
+
+    const tag = this.findInspectTag(hit.object);
+    if (!tag) return null;
+
+    if (tag.kind === 'building') {
+      const mesh = hit.object as THREE.Mesh;
+      const vertex = hit.vertex ?? 0;
+      const buildingId = BuildingView.buildingIdAtVertex(mesh, vertex);
+      const up =
+        hit.object instanceof THREE.Mesh &&
+        hit.object.geometry.getAttribute('normal') &&
+        hit.object.geometry.getAttribute('normal').getY(vertex) > 0.5;
+      const surface = up ? 'roof' : 'wall';
+      return buildingId === null ? `${surface}` : `building #${buildingId} ${surface}`;
+    }
+
+    if (tag.kind === 'part') {
+      const buildingId =
+        hit.instanceId !== undefined
+          ? this.buildingView.buildingIdAt(tag.partKind as PartKind, hit.instanceId)
+          : null;
+      return buildingId === null ? 'part' : `building #${buildingId} part`;
+    }
+
+    if (tag.kind === 'car') return 'car';
+    if (tag.kind === 'ground') return 'ground';
+    if (tag.kind === 'road') return 'road';
+    return FEATURE_LABELS[tag.kind as MapItemKind] ?? `${tag.kind}`;
+  }
+
+  private findInspectTag(object: THREE.Object3D): { kind: string; partKind?: string } | null {
+    let current: THREE.Object3D | null = object;
+    while (current) {
+      const tag = current.userData['inspect'] as
+        | { kind: string; partKind?: string }
+        | undefined;
+      if (tag) return tag;
+      current = current.parent;
+    }
+    return null;
   }
 
   teleportTo(x: number, z: number, heading: number): void {
@@ -350,6 +522,7 @@ export class Engine {
     this.trackView.dispose();
     this.featureView.dispose();
     this.buildingView.dispose();
+    this.debugPins.dispose();
     this.viewport.dispose();
     for (const group of this.propModels.values()) {
       disposeModel(group);

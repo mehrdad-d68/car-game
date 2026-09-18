@@ -189,4 +189,37 @@ describe('BuildingView', () => {
     }
     view.dispose();
   });
+
+  it('maps every pooled part instance back to its building id', () => {
+    const view = new BuildingView(track.buildings, textures());
+    view.update(310.8, -40.1);
+    const pools = (view as unknown as { pools: Map<PartKind, PropPool> }).pools;
+    let resolved = 0;
+    for (const kind of PART_KINDS) {
+      const mesh = pools.get(kind)!.mesh;
+      for (let i = 0; i < mesh.count; i++) {
+        expect(view.buildingIdAt(kind, i)).not.toBeNull();
+        resolved++;
+      }
+    }
+    expect(resolved).toBeGreaterThan(0);
+    view.dispose();
+  });
+
+  it('tags wall meshes for picking and stores a per-vertex building id', () => {
+    const view = new BuildingView(track.buildings, textures());
+    view.update(310.8, -40.1);
+    const wall = view.group.children.find((child) => {
+      const mesh = child as THREE.Mesh;
+      return mesh.isMesh && mesh.name.startsWith('buildings-');
+    }) as THREE.Mesh;
+    expect(wall).toBeDefined();
+    expect(wall.userData['inspect']).toEqual({ kind: 'building' });
+    const idAttribute = wall.geometry.getAttribute('buildingId');
+    expect(idAttribute).toBeDefined();
+    expect(idAttribute.count).toBe(
+      wall.geometry.getAttribute('position').count,
+    );
+    view.dispose();
+  });
 });

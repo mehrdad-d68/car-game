@@ -1,4 +1,4 @@
-import { makeGeoProjector } from './geo';
+import { makeGeoProjector, makeGeoUnprojector } from './geo';
 
 describe('makeGeoProjector', () => {
   const project = makeGeoProjector({ lat: 48.145, lng: 16.29 });
@@ -31,5 +31,24 @@ describe('makeGeoProjector', () => {
     const equatorEast = equator(0, 1).x - equator(0, 0).x;
     const arcticEast = arctic(0, 1).x - arctic(0, 0).x;
     expect(equatorEast).toBeGreaterThan(arcticEast);
+  });
+});
+
+describe('makeGeoUnprojector', () => {
+  const center = { lat: 48.145, lng: 16.29 };
+  const project = makeGeoProjector(center);
+  const unproject = makeGeoUnprojector(center);
+
+  it('round-trips a known OSM node back to its source coordinates', () => {
+    const pos = project(48.1559579, 16.3297091);
+    const coords = unproject(pos.x, pos.z);
+    expect(coords.lat).toBeCloseTo(48.1559579, 6);
+    expect(coords.lng).toBeCloseTo(16.3297091, 6);
+  });
+
+  it('maps the world origin back to the map centre', () => {
+    const coords = unproject(0, 0);
+    expect(coords.lat).toBeCloseTo(center.lat, 9);
+    expect(coords.lng).toBeCloseTo(center.lng, 9);
   });
 });
