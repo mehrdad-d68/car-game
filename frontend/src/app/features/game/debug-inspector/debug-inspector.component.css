@@ -1,0 +1,134 @@
+:host {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.inspector-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.inspector-overlay.active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.inspector-toggle {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  pointer-events: auto;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+  background: rgba(20, 24, 33, 0.85);
+  color: #fff;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.inspector-panel {
+  position: absolute;
+  top: 4.5rem;
+  right: 1rem;
+  width: 340px;
+  max-height: calc(100dvh - 6rem);
+  overflow-y: auto;
+  pointer-events: auto;
+  background: rgba(20, 24, 33, 0.92);
+  color: #fff;
+  border-radius: 6px;
+  padding: 0.6rem;
+  font-size: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inspector-head-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.inspector-panel button,
+.go-form button {
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 0.15rem 0.45rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.go-form {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.go-form input {
+  flex: 1;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.go-error {
+  color: #ffb4a2;
+}
+
+.pins {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.no-pins {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+.pin-card {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  padding: 0.4rem;
+}
+
+.pin-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.pin-num {
+  font-weight: bold;
+  color: #ffe066;
+}
+
+.pin-actions {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.pin-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, monospace;
+  line-height: 1.5;
+}

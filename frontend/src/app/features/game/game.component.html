@@ -1,4 +1,7 @@
 <div #gameContainer class="viewport"></div>
+@if (!isProduction) {
+  <app-debug-inspector />
+}
 <div class="search-overlay">
   <app-street-search
     (streetSelected)="onStreetSelected($event)"

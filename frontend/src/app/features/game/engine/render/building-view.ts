@@ -49,6 +49,7 @@ function geometryFromArrays(arrays: ReturnType<typeof emptyMeshArrays>): THREE.B
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(arrays.normals, 3));
   geometry.setAttribute('uv', new THREE.Float32BufferAttribute(arrays.uvs, 2));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(arrays.colors, 3));
+  geometry.setAttribute('buildingId', new THREE.Float32BufferAttribute(arrays.buildingIds, 1));
   geometry.setIndex(arrays.indices);
   geometry.computeBoundingSphere();
   return geometry;
@@ -71,7 +72,10 @@ export class BuildingView {
   private readonly pools = new Map<PartKind, PropPool>();
   private readonly tiles = new Map<string, THREE.Mesh[]>();
   private readonly tileParts = new Map<string, Map<PartKind, PartInstance[]>>();
-  private readonly poolSpans = new Map<PartKind, Map<string, { start: number; count: number }>>();
+  private readonly poolSpans = new Map<
+    PartKind,
+    Map<string, { start: number; count: number; ids: number[] }>
+  >();
   private readonly plan: (building: Building) => PartPlacement[];
 
   constructor(
@@ -124,6 +128,7 @@ export class BuildingView {
         kind === 'window' ? glassMaterial : kind === 'door' ? doorMaterial : partMaterial;
       const pool = new PropPool(geometry, material, PART_CAPACITY[kind]);
       pool.mesh.name = `parts-${kind}`;
+      pool.mesh.userData['inspect'] = { kind: 'part', partKind: kind };
       pool.mesh.visible = false;
       this.pools.set(kind, pool);
       this.group.add(pool.mesh);
@@ -135,10 +140,27 @@ export class BuildingView {
     return [...this.tiles.keys()];
   }
 
+  buildingIdAt(kind: PartKind, instanceId: number): number | null {
+    const spans = this.poolSpans.get(kind);
+    if (!spans) return null;
+    for (const span of spans.values()) {
+      if (instanceId < span.start || instanceId >= span.start + span.count) continue;
+      return span.ids[instanceId - span.start] ?? null;
+    }
+    return null;
+  }
+
+  static buildingIdAtVertex(mesh: THREE.Mesh, vertexIndex: number): number | null {
+    const idAttr = mesh.geometry.getAttribute('buildingId');
+    if (!idAttr) return null;
+    return idAttr.getX(vertexIndex);
+  }
+
   private buildTile(key: string): void {
     const buildings = this.grid.buildingsIn(key);
     const byStyle = new Map<BuildingStyle, Building[]>();
     const partsByKind = new Map<PartKind, PartInstance[]>();
+    const partIdsByKind = new Map<PartKind, number[]>();
     for (const building of buildings) {
       const bucket = byStyle.get(building.style);
       if (bucket) {
@@ -154,6 +176,12 @@ export class BuildingView {
         } else {
           partsByKind.set(placement.kind, [instance]);
         }
+        const idBucket = partIdsByKind.get(placement.kind);
+        if (idBucket) {
+          idBucket.push(building.id);
+        } else {
+          partIdsByKind.set(placement.kind, [building.id]);
+        }
       }
     }
 
@@ -166,6 +194,7 @@ export class BuildingView {
       }
       const mesh = new THREE.Mesh(geometryFromArrays(arrays), this.materials.get(style));
       mesh.name = `buildings-${style}`;
+      mesh.userData['inspect'] = { kind: 'building' };
       mesh.castShadow = true;
       this.group.add(mesh);
       meshes.push(mesh);
@@ -173,7 +202,11 @@ export class BuildingView {
     for (const [kind, instances] of partsByKind) {
       const pool = this.pools.get(kind)!;
       const start = pool.append(instances.map((instance) => instance.matrix));
-      this.poolSpans.get(kind)!.set(key, { start, count: instances.length });
+      this.poolSpans.get(kind)!.set(key, {
+        start,
+        count: instances.length,
+        ids: partIdsByKind.get(kind) ?? [],
+      });
       pool.mesh.visible = pool.mesh.count > 0;
     }
     this.tiles.set(key, meshes);

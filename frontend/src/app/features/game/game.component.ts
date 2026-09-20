@@ -9,12 +9,14 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { environment } from '../../../environments/environment';
 import { InputService } from '../../core/services/input.service';
 import { BackendCarSource } from './adapters/backend-car-source';
 import { BackendPropSource } from './adapters/backend-prop-source';
 import { BackendTrackSource } from './adapters/backend-track-source';
 import { KeyboardInput } from './adapters/keyboard-input';
 import { CarSelectComponent } from './car-select/car-select.component';
+import { DebugInspectorComponent } from './debug-inspector/debug-inspector.component';
 import { Engine, NavigationState, StepManeuver } from './engine';
 import { CarSpec } from './engine/sim/car-spec';
 import {
@@ -24,15 +26,19 @@ import {
 
 @Component({
   selector: 'app-game',
-  imports: [StreetSearchComponent, CarSelectComponent],
+  imports: [StreetSearchComponent, CarSelectComponent, DebugInspectorComponent],
   templateUrl: './game.component.html',
   styleUrl: './game.component.css',
 })
 export class GameComponent implements AfterViewInit, OnDestroy {
+  readonly isProduction = environment.production;
+
   private readonly container =
     viewChild.required<ElementRef<HTMLDivElement>>('gameContainer');
   private readonly streetSearch = viewChild.required(StreetSearchComponent);
   private readonly carSelect = viewChild.required(CarSelectComponent);
+  private readonly debugInspector =
+    viewChild(DebugInspectorComponent);
   private readonly keys = inject(InputService);
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
@@ -58,6 +64,7 @@ export class GameComponent implements AfterViewInit, OnDestroy {
     }
     this.streetSearch().setTrack(this.engine.track);
     this.carSelect().setCars(this.engine.cars, this.engine.activeCar);
+    this.debugInspector()?.attach(this.engine);
     this.stopNavigationUpdates = this.engine.onNavigation((state) =>
       this.navigationState.set(state),
     );

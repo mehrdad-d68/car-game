@@ -9,3 +9,13 @@ export type {
 } from './ports';
 export type { StepManeuver, RouteStep } from './sim/route-steps';
 export type { PropSpec, PropPart, PropVariant, PropModel } from './sim/prop-spec';
+export { formatReport, inspectPoint, nearestRoadHeading } from './sim/inspect';
+export type {
+  InspectReport,
+  InspectRoadInfo,
+  InspectNodeInfo,
+  InspectBuildingInfo,
+  NearbyFeature,
+  RouteSummary,
+  ReportExtras,
+} from './sim/inspect';

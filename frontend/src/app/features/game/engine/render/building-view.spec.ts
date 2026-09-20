@@ -1,10 +1,12 @@
 import * as THREE from 'three';
-import { BuildingGrid } from '../sim/buildings';
+import { BuildingGrid, createBuildings } from '../sim/buildings';
 import { createTrack } from '../sim/track';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import { BUILD_RADIUS, BuildingView, DROP_RADIUS } from './building-view';
 import { createBuildingTextures } from './building-textures';
+import { appendBuilding, emptyMeshArrays } from './building-geometry';
 import { PART_KINDS, planParts, PartKind } from './detail-kit';
+import { firstHit } from './picker';
 import { PropPool } from './prop-pool';
 
 const textures = () => createBuildingTextures(() => null);
@@ -188,5 +190,80 @@ describe('BuildingView', () => {
       expect(pools.get(kind)!.mesh.visible).toBe(false);
     }
     view.dispose();
+  });
+
+  it('maps every pooled part instance back to its building id', () => {
+    const view = new BuildingView(track.buildings, textures());
+    view.update(310.8, -40.1);
+    const pools = (view as unknown as { pools: Map<PartKind, PropPool> }).pools;
+    let resolved = 0;
+    for (const kind of PART_KINDS) {
+      const mesh = pools.get(kind)!.mesh;
+      for (let i = 0; i < mesh.count; i++) {
+        expect(view.buildingIdAt(kind, i)).not.toBeNull();
+        resolved++;
+      }
+    }
+    expect(resolved).toBeGreaterThan(0);
+    view.dispose();
+  });
+
+  it('tags wall meshes for picking and stores a per-vertex building id', () => {
+    const view = new BuildingView(track.buildings, textures());
+    view.update(310.8, -40.1);
+    const wall = view.group.children.find((child) => {
+      const mesh = child as THREE.Mesh;
+      return mesh.isMesh && mesh.name.startsWith('buildings-');
+    }) as THREE.Mesh;
+    expect(wall).toBeDefined();
+    expect(wall.userData['inspect']).toEqual({ kind: 'building' });
+    const idAttribute = wall.geometry.getAttribute('buildingId');
+    expect(idAttribute).toBeDefined();
+    expect(idAttribute.count).toBe(
+      wall.geometry.getAttribute('position').count,
+    );
+    view.dispose();
+  });
+
+  it('resolves a raycast on the second of two buildings to its own id', () => {
+    const buildings = createBuildings([
+      {
+        id: 101,
+        type: 'house',
+        name: '',
+        points: [
+          { x: 0, z: 0 }, { x: 20, z: 0 }, { x: 20, z: 20 }, { x: 0, z: 20 }, { x: 0, z: 0 },
+        ],
+      },
+      {
+        id: 202,
+        type: 'house',
+        name: '',
+        points: [
+          { x: 60, z: 0 }, { x: 80, z: 0 }, { x: 80, z: 20 }, { x: 60, z: 20 }, { x: 60, z: 0 },
+        ],
+      },
+    ]);
+    const arrays = emptyMeshArrays();
+    for (const building of buildings) appendBuilding(arrays, building, 0xf2e4cf);
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(arrays.positions, 3));
+    geometry.setAttribute('buildingId', new THREE.Float32BufferAttribute(arrays.buildingIds, 1));
+    geometry.setIndex(arrays.indices);
+    geometry.computeBoundingSphere();
+
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial());
+    mesh.updateMatrixWorld();
+
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+    camera.position.set(70, 50, 10);
+    camera.lookAt(70, 0, 10);
+    camera.updateMatrixWorld();
+
+    const hit = firstHit(camera, 0, 0, [mesh]);
+    expect(hit).not.toBeNull();
+    expect(hit!.vertex).toEqual(expect.any(Number));
+    expect(BuildingView.buildingIdAtVertex(mesh, hit!.vertex!)).toBe(202);
   });
 });

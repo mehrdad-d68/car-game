@@ -1077,6 +1077,7 @@ export class TrackView {
     ground.position.set(centerX, GROUND_HEIGHT, centerZ);
     ground.receiveShadow = true;
     ground.name = 'ground';
+    ground.userData['inspect'] = { kind: 'ground' };
 
     const positions = ground.geometry.getAttribute('position');
     const uvs = new Float32Array(positions.count * 2);
@@ -1114,6 +1115,7 @@ export class TrackView {
       const mesh = new THREE.Mesh(batch.geometry, material);
       mesh.receiveShadow = true;
       mesh.name = `roads-${cls}`;
+      mesh.userData['inspect'] = { kind: 'road' };
       this.group.add(mesh);
 
       const kerbBase = allKerbPositions.length / 3;
@@ -1143,6 +1145,7 @@ export class TrackView {
       const kerbMesh = new THREE.Mesh(kerbGeo, kerbMat);
       kerbMesh.receiveShadow = true;
       kerbMesh.name = 'kerbs';
+      kerbMesh.userData['inspect'] = { kind: 'road' };
       this.group.add(kerbMesh);
     }
 
@@ -1172,6 +1175,7 @@ export class TrackView {
       const swMesh = new THREE.Mesh(swGeo, swMat);
       swMesh.receiveShadow = true;
       swMesh.name = 'sidewalks';
+      swMesh.userData['inspect'] = { kind: 'road' };
       this.group.add(swMesh);
     }
   }
@@ -1287,6 +1291,7 @@ export class TrackView {
       const mesh = new THREE.Mesh(geometry, material);
       mesh.receiveShadow = true;
       mesh.name = 'junction-patch';
+      mesh.userData['inspect'] = { kind: 'road' };
       this.group.add(mesh);
     }
   }
@@ -1369,6 +1374,7 @@ export class TrackView {
       mesh.position.set(plan.x, BARRIER_HEIGHT / 2, plan.z);
       mesh.rotation.y = barrierRotationY(plan.ux, plan.uz);
       mesh.visible = false;
+      mesh.userData['inspect'] = { kind: 'road' };
       this.group.add(mesh);
 
       const entry = { mesh, position: { x: plan.x, z: plan.z } };

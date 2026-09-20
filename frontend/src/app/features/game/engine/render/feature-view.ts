@@ -538,6 +538,7 @@ export class FeatureView {
         pool,
         entries,
       };
+      pool.mesh.userData['inspect'] = { kind: built.kind };
       this._pools.push(built);
       this.group.add(pool.mesh);
     }
@@ -607,6 +608,7 @@ export class FeatureView {
     holder.rotation.y = placement.yaw;
     holder.add(source.clone());
     holder.visible = false;
+    holder.userData['inspect'] = { kind };
     this.modelRecords.push({ group: holder, x: placement.x, z: placement.z });
     this.group.add(holder);
   }

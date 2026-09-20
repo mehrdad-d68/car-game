@@ -8,13 +8,14 @@ export interface MeshArrays {
   uvs: number[];
   colors: number[];
   indices: number[];
+  buildingIds: number[];
 }
 
 export const WALL_TILE_METRES = 12.8;
 const ROOF_TILE_METRES = 6;
 
 export function emptyMeshArrays(): MeshArrays {
-  return { positions: [], normals: [], uvs: [], colors: [], indices: [] };
+  return { positions: [], normals: [], uvs: [], colors: [], indices: [], buildingIds: [] };
 }
 
 export function appendBuilding(target: MeshArrays, building: Building, color: number): void {
@@ -42,6 +43,7 @@ export function appendBuilding(target: MeshArrays, building: Building, color: nu
     for (let k = 0; k < 4; k++) {
       target.normals.push(nx, 0, nz);
       target.colors.push(tint.r, tint.g, tint.b);
+      target.buildingIds.push(building.id);
     }
     target.uvs.push(u0, 0, u1, 0, u0, vTop, u1, vTop);
     target.indices.push(base + 2, base + 1, base, base + 2, base + 3, base + 1);
@@ -54,6 +56,7 @@ export function appendBuilding(target: MeshArrays, building: Building, color: nu
     target.normals.push(0, 1, 0);
     target.colors.push(tint.r, tint.g, tint.b);
     target.uvs.push(p.x / ROOF_TILE_METRES, p.z / ROOF_TILE_METRES);
+    target.buildingIds.push(building.id);
   }
   const triangles = THREE.ShapeUtils.triangulateShape(contour, []);
   if (triangles.length === 0) return;

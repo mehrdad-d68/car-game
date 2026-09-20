@@ -15,6 +15,7 @@ export class CarView {
     private readonly appearance: CarAppearance,
     modelGroup?: THREE.Group,
   ) {
+    this.group.userData['inspect'] = { kind: 'car' };
     this.modelGroup = modelGroup ?? null;
     if (modelGroup) {
       this.group.add(modelGroup);
