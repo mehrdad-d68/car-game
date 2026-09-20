@@ -64,7 +64,7 @@ export interface ReportExtras {
   map: string | null;
 }
 
-const NEARBY_LABEL: Record<MapItemKind, string> = {
+export const FEATURE_LABELS: Record<MapItemKind, string> = {
   trafficLight: 'traffic light',
   pedestrianCrossing: 'crossing',
   busStop: 'bus stop',
@@ -197,10 +197,10 @@ function nearestNodeInfo(
 
 function collectNearby(track: TrackData, x: number, z: number): NearbyFeature[] {
   const features: { label: string; x: number; z: number }[] = [];
-  for (const kind of Object.keys(NEARBY_LABEL) as MapItemKind[]) {
+  for (const kind of Object.keys(FEATURE_LABELS) as MapItemKind[]) {
     const key = featureKey(kind);
     for (const item of track.features[key]) {
-      features.push({ label: NEARBY_LABEL[kind], x: item.position.x, z: item.position.z });
+      features.push({ label: FEATURE_LABELS[kind], x: item.position.x, z: item.position.z });
     }
   }
   const nearby: NearbyFeature[] = [];
@@ -341,7 +341,7 @@ function nearbyLine(report: InspectReport): string | null {
 function carLine(extras: ReportExtras, x: number, z: number): string | null {
   const car = extras.car;
   if (!car) return null;
-  const degrees = Math.round(((car.heading * 180) / Math.PI) % 360);
+  const degrees = Math.round((((car.heading * 180) / Math.PI) % 360 + 360) % 360);
   const distance = Math.round(Math.hypot(car.position.x - x, car.position.z - z));
   return `car: x=${formatFixed(car.position.x)} z=${formatFixed(car.position.z)} · heading ${degrees}° · ${distance} m away`;
 }
@@ -354,7 +354,7 @@ function routeLine(extras: ReportExtras): string | null {
         route.next.street || 'the street'
       } in ${formatFixed(route.next.distance)} m`
     : '';
-  return `route: to "${route.street}" · ${formatFixed(route.remaining)} m along${next}`;
+  return `route: to "${route.street}" · ${formatFixed(route.remaining)} m left${next}`;
 }
 
 function mapLine(extras: ReportExtras): string | null {
@@ -417,5 +417,8 @@ export function nearestRoadHeading(track: TrackData, x: number, z: number): numb
     }
   }
   if (!dir) return 0;
+  if (nearest.road.oneway === -1) {
+    dir = { x: -dir.x, z: -dir.z };
+  }
   return Math.atan2(-dir.x, -dir.z);
 }

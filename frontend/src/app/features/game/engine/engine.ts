@@ -18,7 +18,7 @@ import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
 import { Viewport } from './render/viewport';
 import { CarModel, CarSpec } from './sim/car-spec';
-import { inspectPoint, formatReport, nearestRoadHeading } from './sim/inspect';
+import { FEATURE_LABELS, inspectPoint, formatReport, nearestRoadHeading } from './sim/inspect';
 import type { InspectReport, ReportExtras } from './sim/inspect';
 import type { StepManeuver } from './sim/route-steps';
 import { Guidance, guide, RouteProgress } from './sim/guidance';
@@ -36,16 +36,6 @@ const LIGHT_OFFSET = new THREE.Vector3(50, 80, 30);
 const DEFAULT_CAR_ID = 'coupe';
 const NOTIFY_INTERVAL = 0.25;
 const MAX_PINS = 9;
-
-const FEATURE_LABELS: Record<MapItemKind, string> = {
-  trafficLight: 'traffic light',
-  pedestrianCrossing: 'crossing',
-  busStop: 'bus stop',
-  gasStation: 'gas station',
-  fireStation: 'fire station',
-  hospital: 'hospital',
-  policeStation: 'police station',
-};
 
 export type NavigateResult = 'ok' | 'no-route';
 
@@ -327,8 +317,6 @@ export class Engine {
   }
 
   goTo(x: number, z: number): void {
-    this.clearPins();
-    this.setInspectMode(false);
     this.teleportTo(x, z, nearestRoadHeading(this.track, x, z));
   }
 

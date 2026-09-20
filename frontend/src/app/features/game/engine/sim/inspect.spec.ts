@@ -218,7 +218,17 @@ describe('formatReport', () => {
     };
     const text = formatReport(1, report, withRoute);
     expect(text).toContain('route: to "Stephansplatz"');
+    expect(text).toContain('312.0 m left');
     expect(text).toContain('next: right onto Graben in 48.0 m');
+  });
+
+  it('prints a normalised 0-359 heading even for a negative sin', () => {
+    const withCar: ReportExtras = {
+      ...extras,
+      car: { position: { x: 0, z: 0 }, heading: -Math.PI / 4, speed: 0 },
+    };
+    const text = formatReport(1, report, withCar);
+    expect(text).toContain('heading 315°');
   });
 
   it('adds the map line when map context is present', () => {
@@ -236,6 +246,31 @@ describe('nearestRoadHeading', () => {
     const track = createTrack(ROADS);
     const heading = nearestRoadHeading(track, 25, 0);
     expect(-Math.sin(heading)).toBeCloseTo(1, 5);
+    expect(-Math.cos(heading)).toBeCloseTo(0, 5);
+  });
+
+  it('faces the car along traffic on a one-way -1 road', () => {
+    const BACK: OSMMapData = {
+      meta: META,
+      roads: [
+        {
+          id: 2,
+          type: 'residential',
+          name: 'Back',
+          lanes: 2,
+          width: 8,
+          oneway: -1,
+          access: 'yes',
+          points: [
+            { x: 0, z: 0 },
+            { x: 100, z: 0 },
+          ],
+        },
+      ],
+    };
+    const track = createTrack(BACK);
+    const heading = nearestRoadHeading(track, 25, 0);
+    expect(-Math.sin(heading)).toBeCloseTo(-1, 5);
     expect(-Math.cos(heading)).toBeCloseTo(0, 5);
   });
 });

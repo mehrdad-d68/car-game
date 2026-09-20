@@ -30,6 +30,12 @@ export function parseGoTo(
   center: { lat: number; lng: number },
   bounds?: { minX: number; minZ: number; maxX: number; maxZ: number },
 ): { x: number; z: number } | null {
+  const xMatch = text.match(/x\s*=\s*(-?\d+(?:\.\d+)?)/);
+  const zMatch = text.match(/z\s*=\s*(-?\d+(?:\.\d+)?)/);
+  if (xMatch && zMatch) {
+    return { x: Number(xMatch[1]), z: Number(zMatch[1]) };
+  }
+
   const parts = text
     .trim()
     .split(/[\s,;]+/)
@@ -41,10 +47,7 @@ export function parseGoTo(
   if (Math.abs(a) > 90 || Math.abs(b) > 180) return asWorld;
   const project = makeGeoProjector(center);
   const asLatLng = project(a, b);
-  if (bounds) {
-    if (withinBounds(asWorld.x, asWorld.z, bounds)) return asWorld;
-    if (withinBounds(asLatLng.x, asLatLng.z, bounds)) return asLatLng;
-  }
+  if (bounds && withinBounds(asLatLng.x, asLatLng.z, bounds)) return asLatLng;
   return asWorld;
 }
 
@@ -123,7 +126,6 @@ export class DebugInspectorComponent implements OnInit {
     const pos = this.engine.pinPosition(pin.n);
     this.engine.goTo(pos.x, pos.z);
     this.goToText = '';
-    this.pins.set([]);
   }
 
   onGoToSubmit(): void {
@@ -140,6 +142,5 @@ export class DebugInspectorComponent implements OnInit {
     }
     this.engine.goTo(pos.x, pos.z);
     this.goToText = '';
-    this.pins.set([]);
   }
 }

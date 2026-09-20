@@ -1,6 +1,8 @@
 import { EnvironmentInjector, runInInjectionContext } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Engine } from '../engine';
+import { formatReport } from '../engine/sim/inspect';
+import { InspectReport } from '../engine/sim/inspect';
 import {
   DebugInspectorComponent,
   parseGoTo,
@@ -8,6 +10,8 @@ import {
 
 const CENTER = { lat: 48.2, lng: 16.3 };
 const SMALL_BOUNDS = { minX: -10, minZ: -10, maxX: 10, maxZ: 10 };
+const REAL_CENTER = { lat: 48.145, lng: 16.29 };
+const REAL_BOUNDS = { minX: -3587, minZ: -2038, maxX: 3640, maxZ: 2350 };
 
 describe('parseGoTo', () => {
   it('parses raw world coordinates', () => {
@@ -22,6 +26,45 @@ describe('parseGoTo', () => {
     const pos = parseGoTo('48.2,16.3', CENTER, SMALL_BOUNDS)!;
     expect(pos.x).toBeCloseTo(0, 5);
     expect(pos.z).toBeCloseTo(0, 5);
+  });
+
+  it('treats a lat/lng pair inside the real map bounds as lat/lng, not metres', () => {
+    const pos = parseGoTo('48.149095,16.300936', REAL_CENTER, REAL_BOUNDS)!;
+    expect(pos.x).toBeCloseTo(812.3, 0);
+    expect(pos.z).toBeCloseTo(-455.9, 0);
+  });
+
+  it('stays in world metres when a degree pair projects outside the map', () => {
+    expect(parseGoTo('48,16', REAL_CENTER, REAL_BOUNDS)).toEqual({ x: 48, z: 16 });
+  });
+
+  it('accepts the report coordinate format with x= and z= prefixes', () => {
+    expect(parseGoTo('x=812.3 z=-455.9', CENTER, SMALL_BOUNDS)).toEqual({
+      x: 812.3,
+      z: -455.9,
+    });
+  });
+
+  it('round-trips the first line of a formatReport output', () => {
+    const report: InspectReport = {
+      x: 812.3,
+      z: -455.9,
+      lat: 48.149095,
+      lng: 16.300936,
+      road: null,
+      node: null,
+      building: null,
+      nearby: [],
+    };
+    const firstLine = formatReport(2, report, {
+      hit: null,
+      car: null,
+      route: null,
+      map: null,
+    }).split('\n')[0];
+    const pos = parseGoTo(firstLine, REAL_CENTER, REAL_BOUNDS)!;
+    expect(pos.x).toBeCloseTo(812.3, 1);
+    expect(pos.z).toBeCloseTo(-455.9, 1);
   });
 
   it('rejects anything that is not two numbers', () => {

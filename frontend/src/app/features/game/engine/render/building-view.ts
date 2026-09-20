@@ -151,13 +151,9 @@ export class BuildingView {
   }
 
   static buildingIdAtVertex(mesh: THREE.Mesh, vertexIndex: number): number | null {
-    const geometry = mesh.geometry;
-    let index = vertexIndex;
-    const indexAttr = geometry.getIndex();
-    if (indexAttr) index = indexAttr.getX(vertexIndex);
-    const idAttr = geometry.getAttribute('buildingId');
+    const idAttr = mesh.geometry.getAttribute('buildingId');
     if (!idAttr) return null;
-    return idAttr.getX(index);
+    return idAttr.getX(vertexIndex);
   }
 
   private buildTile(key: string): void {
