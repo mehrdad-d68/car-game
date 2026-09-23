@@ -7,12 +7,15 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { environment } from '../../../../environments/environment';
+import { BuildingAssignment } from '../engine/sim/building-spec';
 import { Engine } from '../engine';
 import { makeGeoProjector } from '../engine/sim/geo';
 
 export interface InspectPin {
   n: number;
   text: string;
+  buildingId: number | null;
+  design: { spec: string | null; name: string | null } | null;
 }
 
 export const MAX_PINS = 9;
@@ -111,9 +114,55 @@ export class DebugInspectorComponent implements OnInit {
     const n = this.engine.pinCount;
     const text = this.engine.reportText(n);
     if (text === null) return;
+    const buildingId = result.buildingId;
+    const pin: InspectPin = {
+      n,
+      text,
+      buildingId,
+      design:
+        buildingId !== null
+          ? this.designOf(this.engine.buildingDesign(buildingId))
+          : null,
+    };
     this.pins.update((current) =>
-      current.some((pin) => pin.n === n) ? current : [...current, { n, text }],
+      current.some((existing) => existing.n === n) ? current : [...current, pin],
     );
+  }
+
+  private designOf(spec: { id: string; name: string } | null): { spec: string | null; name: string | null } {
+    return spec ? { spec: spec.id, name: spec.name } : { spec: null, name: null };
+  }
+
+  buildingDesigns(): { id: string; name: string }[] {
+    return this.engine ? this.engine.buildingDesigns : [];
+  }
+
+  pinDesignValue(pin: InspectPin): string {
+    const override = pin.buildingId !== null ? this.engine?.workingOverride(pin.buildingId) : undefined;
+    if (override) return override.spec ?? 'procedural';
+    return pin.design?.spec ?? 'procedural';
+  }
+
+  onBuildingDesignChange(pin: InspectPin, value: string): void {
+    if (!this.engine || pin.buildingId === null) return;
+    const engine = this.engine;
+    const buildingId = pin.buildingId;
+    const override: BuildingAssignment | null =
+      value === 'procedural' ? { spec: null } : { spec: value };
+    engine.setBuildingOverride(buildingId, override);
+    this.pins.update((current) =>
+      current.map((existing) =>
+        existing.n === pin.n
+          ? { ...existing, design: this.designOf(engine.buildingDesign(buildingId)) }
+          : existing,
+      ),
+    );
+  }
+
+  copyOverrides(pins: InspectPin[]): void {
+    if (!this.engine) return;
+    const text = this.engine.workingOverridesJson();
+    if (text && text !== '{}') void navigator.clipboard?.writeText(text);
   }
 
   copyPins(pins: InspectPin[]): void {

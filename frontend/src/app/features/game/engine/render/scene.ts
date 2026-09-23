@@ -6,12 +6,12 @@ const GROUND_BOUNCE = new THREE.Color(0x6b7c52);
 
 const SUN_COLOR = 0xfff4e0;
 const SUN_INTENSITY = 1.6;
-const HEMISPHERE_SKY_INTENSITY = 0.7;
+const HEMISPHERE_SKY_INTENSITY = 0.55;
 
 const FOG_NEAR = 600;
 const FOG_FAR = 2500;
-const SHADOW_EXTENT = 20;
-const SHADOW_MAP_SIZE = 512;
+const SHADOW_EXTENT = 250;
+const SHADOW_MAP_SIZE = 2048;
 
 export interface SceneLights {
   sun: THREE.DirectionalLight;
@@ -68,8 +68,8 @@ export function createScene(): SceneSetup {
   sun.shadow.camera.right = SHADOW_EXTENT;
   sun.shadow.camera.top = SHADOW_EXTENT;
   sun.shadow.camera.bottom = -SHADOW_EXTENT;
-  sun.shadow.camera.near = 60;
-  sun.shadow.camera.far = 140;
+  sun.shadow.camera.near = 40;
+  sun.shadow.camera.far = 400;
   scene.add(sun);
 
   return { scene, lights: { sun }, sky };

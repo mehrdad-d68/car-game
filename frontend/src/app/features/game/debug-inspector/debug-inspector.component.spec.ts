@@ -5,6 +5,7 @@ import { formatReport } from '../engine/sim/inspect';
 import { InspectReport } from '../engine/sim/inspect';
 import {
   DebugInspectorComponent,
+  InspectPin,
   parseGoTo,
 } from './debug-inspector.component';
 
@@ -103,6 +104,11 @@ describe('DebugInspectorComponent', () => {
       pinPosition: () => ({ x: 0, z: 0 }),
       goTo: () => undefined,
       track: { meta: { center: CENTER } },
+      buildingDesigns: [],
+      buildingDesign: () => null,
+      workingOverride: () => undefined,
+      setBuildingOverride: () => undefined,
+      workingOverridesJson: () => '{}',
     } as unknown as Engine;
     return { engine, state };
   }
@@ -124,8 +130,8 @@ describe('DebugInspectorComponent', () => {
     expect(state.inspectMode).toBe(true);
     expect(engine.inspectMode).toBe(true);
     c.pins.set([
-      { n: 1, text: 'a' },
-      { n: 2, text: 'b' },
+      { n: 1, text: 'a', buildingId: null, design: null },
+      { n: 2, text: 'b', buildingId: null, design: null },
     ]);
     c.toggle();
     expect(c.active()).toBe(false);
@@ -156,6 +162,7 @@ describe('DebugInspectorComponent', () => {
           nearby: [],
         },
         hit: null,
+        buildingId: null,
       };
     });
     vi.spyOn(engine, 'reportText').mockReturnValue('report text');
@@ -163,6 +170,76 @@ describe('DebugInspectorComponent', () => {
     c.toggle();
     c.onContainerClick({ clientX: 10, clientY: 20 } as MouseEvent);
     expect(engine.pinCount).toBe(1);
-    expect(c.pins()).toEqual([{ n: 1, text: 'report text' }]);
+    expect(c.pins()).toEqual([
+      { n: 1, text: 'report text', buildingId: null, design: null },
+    ]);
+  });
+
+  it('tags a pin that lands on a building with its id and drawn design', () => {
+    const { engine, state } = fakeEngine();
+    vi.spyOn(engine, 'inspectAt').mockImplementation(() => {
+      state.pinCount = 1;
+      return {
+        report: {
+          x: 1,
+          z: 2,
+          lat: 1,
+          lng: 2,
+          road: null,
+          node: null,
+          building: null,
+          nearby: [],
+        },
+        hit: 'building #42 roof',
+        buildingId: 42,
+      };
+    });
+    vi.spyOn(engine, 'reportText').mockReturnValue('report text');
+    vi.spyOn(engine, 'buildingDesign').mockReturnValue({ id: 'house', name: 'House' } as never);
+    const c = component(engine);
+    c.toggle();
+    c.onContainerClick({ clientX: 10, clientY: 20 } as MouseEvent);
+    expect(c.pins()[0].buildingId).toBe(42);
+    expect(c.pins()[0].design).toEqual({ spec: 'house', name: 'House' });
+  });
+
+  it('writes a design pick into the working overrides and refreshes the pin', () => {
+    const { engine } = fakeEngine();
+    const set = vi.spyOn(engine, 'setBuildingOverride');
+    vi.spyOn(engine, 'workingOverride').mockReturnValue(undefined);
+    vi.spyOn(engine, 'buildingDesign').mockImplementation(((buildingId: number) =>
+      buildingId === 42
+        ? { id: 'tenement', name: 'Tenement' }
+        : null) as never);
+    const c = component(engine);
+    const pin: InspectPin = { n: 1, text: 't', buildingId: 42, design: null };
+    c.pins.set([pin]);
+    c.onBuildingDesignChange(pin, 'tenement');
+    expect(set).toHaveBeenCalledWith(42, { spec: 'tenement' });
+    expect(c.pins()[0].design).toEqual({ spec: 'tenement', name: 'Tenement' });
+  });
+
+  it('writes spec null when "procedural" is chosen', () => {
+    const { engine } = fakeEngine();
+    const set = vi.spyOn(engine, 'setBuildingOverride');
+    vi.spyOn(engine, 'workingOverride').mockReturnValue(undefined);
+    vi.spyOn(engine, 'buildingDesign').mockReturnValue(null);
+    const c = component(engine);
+    const pin: InspectPin = { n: 1, text: 't', buildingId: 42, design: null };
+    c.pins.set([pin]);
+    c.onBuildingDesignChange(pin, 'procedural');
+    expect(set).toHaveBeenCalledWith(42, { spec: null });
+  });
+
+  it('copies the working overrides JSON', () => {
+    const { engine } = fakeEngine();
+    vi.spyOn(engine, 'workingOverridesJson').mockReturnValue('{ "42": { "spec": "tenement" } }');
+    const clipboard = { writeText: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
+    const c = component(engine);
+    c.copyOverrides([
+      { n: 1, text: 't', buildingId: 42, design: { spec: 'tenement', name: 'Tenement' } },
+    ]);
+    expect(clipboard.writeText).toHaveBeenCalledWith('{ "42": { "spec": "tenement" } }');
   });
 });

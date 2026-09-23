@@ -16,6 +16,7 @@
         <div class="inspector-head">
           <span>Map inspector</span>
           <span class="inspector-head-actions">
+            <button (click)="copyOverrides(pins())">Copy overrides</button>
             <button (click)="copyPins(pins())">Copy all</button>
             <button (click)="toggle()">Close</button>
           </span>
@@ -52,6 +53,22 @@
                 </span>
               </div>
               <pre class="pin-text">{{ pin.text }}</pre>
+              @if (pin.buildingId !== null) {
+                <div class="pin-design">
+                  <label>
+                    drawn as {{ pin.design?.name ?? 'procedural' }}
+                    <select
+                      [ngModel]="pinDesignValue(pin)"
+                      (ngModelChange)="onBuildingDesignChange(pin, $event)"
+                    >
+                      @for (design of buildingDesigns(); track design.id) {
+                        <option [value]="design.id">{{ design.name }}</option>
+                      }
+                      <option value="procedural">procedural</option>
+                    </select>
+                  </label>
+                </div>
+              }
             </div>
           } @empty {
             <div class="no-pins">Click the map to drop a pin.</div>
