@@ -1,12 +1,5 @@
 import { createBuildings, FLOOR_HEIGHT } from '../sim/buildings';
-import {
-  DOOR_CLEAR,
-  DOOR_HEIGHT,
-  PART_KINDS,
-  planParts,
-  WINDOW_HEIGHT,
-  WINDOW_INSET,
-} from './detail-kit';
+import { PART_KINDS, planParts } from './detail-kit';
 
 function make(type: string, size: number, levels: number | null, id = 1) {
   return createBuildings([
@@ -30,6 +23,10 @@ function onEdge(part: { x: number; z: number; yaw: number }, yaw: number): numbe
   return part.x * Math.sin(yaw) + part.z * Math.cos(yaw);
 }
 
+function toSet(kinds: string[]): Set<string> {
+  return new Set(kinds);
+}
+
 describe('planParts', () => {
   it('gives houses a sloped roof and no parapet', () => {
     const kinds = planParts(make('house', 10, 2)).map((p) => p.kind);
@@ -51,9 +48,9 @@ describe('planParts', () => {
     expect(parts.map((p) => p.kind)).toContain('sign');
   });
 
-  it('gives works a sawtooth roof and huts only a flat roof and a door', () => {
+  it('gives works a sawtooth roof and huts only a flat roof', () => {
     expect(planParts(make('industrial', 40, 1)).map((p) => p.kind)).toContain('sawtooth');
-    expect(planParts(make('shed', 6, 1)).map((p) => p.kind)).toEqual(['flatRoof', 'door']);
+    expect(planParts(make('shed', 6, 1)).map((p) => p.kind)).toEqual(['flatRoof']);
   });
 
   it('is stable for one building and differs between buildings', () => {
@@ -62,14 +59,14 @@ describe('planParts', () => {
     expect(JSON.stringify(planParts(make('apartments', 30, 6, 222)))).not.toEqual(JSON.stringify(a));
   });
 
-  it('keeps every part above the ground and within the footprint', () => {
+  it('keeps every part above the ground and near the footprint', () => {
     for (const type of ['house', 'apartments', 'retail', 'industrial', 'shed']) {
       for (const part of planParts(make(type, 20, 3))) {
         expect(PART_KINDS).toContain(part.kind);
         expect(part.y).toBeGreaterThan(0);
-        expect(part.x).toBeGreaterThanOrEqual(-1);
+        expect(part.x).toBeGreaterThanOrEqual(-1.5);
         expect(part.x).toBeLessThanOrEqual(21);
-        expect(part.z).toBeGreaterThanOrEqual(-1);
+        expect(part.z).toBeGreaterThanOrEqual(-1.5);
         expect(part.z).toBeLessThanOrEqual(21);
       }
     }
@@ -180,56 +177,148 @@ describe('roof parts follow the real outline', () => {
   });
 });
 
-describe('windows and doors', () => {
-  it('gives every building exactly one door on the longest wall', () => {
+describe('part kinds', () => {
+  it('no longer plans windows or doors as boxes', () => {
+    expect(PART_KINDS).not.toContain('window');
+    expect(PART_KINDS).not.toContain('door');
     for (const type of ['house', 'apartments', 'retail', 'industrial', 'shed']) {
-      const doors = planParts(make(type, 12, 2, 5)).filter((p) => p.kind === 'door');
-      expect(doors).toHaveLength(1);
+      const parts = planParts(make(type, 20, 3, 4));
+      expect(parts.some((p) => String(p.kind) === 'window' || String(p.kind) === 'door')).toBe(false);
     }
   });
+});
 
-  it('stands the door on the ground at the middle of the wall it belongs to', () => {
-    const door = planParts(make('house', 12, 2, 7)).find((p) => p.kind === 'door')!;
-    expect(door.y).toBeCloseTo(DOOR_HEIGHT / 2, 6);
-    expect(door.sy).toBeCloseTo(DOOR_HEIGHT, 6);
-    expect(onEdge(door, door.yaw)).toBeCloseTo(6, 5);
-  });
-
-  it('fills every storey with evenly spaced windows, clear of the door', () => {
-    const parts = planParts(make('house', 20, 2, 9));
-    const windows = parts.filter((p) => p.kind === 'window');
-    expect(windows).toHaveLength(46);
-    const door = parts.find((p) => p.kind === 'door')!;
-    for (const window of windows) {
-      if (Math.abs(window.yaw - door.yaw) < 1e-6) {
-        expect(Math.abs(onEdge(window, door.yaw) - onEdge(door, door.yaw))).toBeGreaterThanOrEqual(
-          door.sz / 2 + DOOR_CLEAR - WINDOW_INSET,
-        );
+describe('balconies', () => {
+  it('gives houses and apartments balconies on the longest wall', () => {
+    for (const type of ['house', 'apartments']) {
+      const parts = planParts(make(type, 30, 6, 21)).filter((p) => p.kind === 'balcony');
+      expect(parts.length).toBeGreaterThanOrEqual(1);
+      expect(parts.length).toBeLessThanOrEqual(3);
+      for (const balcony of parts) {
+        expect(balcony.sy).toBeCloseTo(0.14, 6);
+        expect(balcony.y).toBeGreaterThanOrEqual(FLOOR_HEIGHT + 0.15);
       }
     }
   });
 
-  it('keeps one window row per floor, all below the roof', () => {
-    const parts = planParts(make('house', 20, 3, 11));
-    const windows = parts.filter((p) => p.kind === 'window');
-    expect(windows).toHaveLength(69);
-    for (const window of windows) {
-      expect(window.y + WINDOW_HEIGHT / 2).toBeLessThan(3 * FLOOR_HEIGHT);
-      expect(window.sy).toBeCloseTo(WINDOW_HEIGHT, 6);
+  it('keeps balconies on the street face and above the plinth', () => {
+    const parts = planParts(make('house', 30, 4, 23));
+    const balconies = parts.filter((p) => p.kind === 'balcony');
+    for (const balcony of balconies) {
+      expect(balcony.y).toBeGreaterThan(FLOOR_HEIGHT);
+      const along = onEdge(balcony, balcony.yaw);
+      expect(Math.abs(along)).toBeLessThan(28.9);
+      expect(Math.abs(along)).toBeGreaterThan(1);
     }
   });
 
-  it('draws no windows on a hut and a wider door on huts and works', () => {
-    const hut = planParts(make('shed', 6, 1, 13));
-    expect(hut.filter((p) => p.kind === 'window')).toHaveLength(0);
-    expect(hut.find((p) => p.kind === 'door')!.sz).toBeCloseTo(2.4, 6);
-    const works = planParts(make('industrial', 40, 1, 17));
-    expect(works.find((p) => p.kind === 'door')!.sz).toBeCloseTo(2.4, 6);
+  it('sits the slab against the wall instead of floating outside it', () => {
+    const building = make('apartments', 20, 3);
+    const balconies = planParts(building).filter((p) => p.kind === 'balcony');
+    expect(balconies.length).toBeGreaterThanOrEqual(1);
+    const a = building.points[0];
+    const b = building.points[1];
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const ux = (b.x - a.x) / len;
+    const uz = (b.z - a.z) / len;
+    for (const balcony of balconies) {
+      const offset = (balcony.x - a.x) * uz - (balcony.z - a.z) * ux;
+      expect(offset - balcony.sx / 2).toBeLessThan(0.01);
+      expect(offset + balcony.sx / 2).toBeGreaterThan(0.9);
+    }
   });
 
-  it('leaves the shop ground floor as a storefront', () => {
-    const windows = planParts(make('retail', 12, 2, 19)).filter((p) => p.kind === 'window');
-    expect(windows.length).toBeGreaterThan(0);
-    expect(windows.every((w) => w.y > FLOOR_HEIGHT)).toBe(true);
+  it('guards each balcony on the front and sides and gives it an access door', () => {
+    const building = make('apartments', 20, 3);
+    const parts = planParts(building);
+    const balconies = parts.filter((p) => p.kind === 'balcony');
+    expect(balconies.length).toBeGreaterThanOrEqual(1);
+    const guards = parts.filter((p) => p.kind === 'balustrade');
+    const doors = parts.filter((p) => p.kind === 'balconyDoor');
+    expect(guards.length).toBeGreaterThanOrEqual(balconies.length * 3);
+    expect(doors.length).toBe(balconies.length);
+    for (let i = 0; i < balconies.length; i++) {
+      expect(guards[i * 3].yaw).toBe(balconies[i].yaw);
+      expect(onEdge(doors[i], doors[i].yaw)).toBeCloseTo(onEdge(balconies[i], balconies[i].yaw), 6);
+      expect(doors[i].y).toBeGreaterThan(0);
+    }
+  });
+
+  it('gives shops, works and huts no balconies or dormers', () => {
+    for (const type of ['retail', 'industrial', 'shed']) {
+      const kinds = toSet(planParts(make(type, 30, 3, 25)).map((p) => p.kind));
+      expect(kinds.has('balcony')).toBe(false);
+      expect(kinds.has('dormer')).toBe(false);
+    }
+  });
+
+  it('keeps balconies out of a taller building that covers the street side', () => {
+    const house = make('house', 30, 4, 41);
+    expect(planParts(house).filter((p) => p.kind === 'balcony').length).toBeGreaterThan(0);
+
+    const tower = createBuildings([
+      {
+        id: 42,
+        type: 'apartments',
+        name: '',
+        levels: 8,
+        points: [
+          { x: 0, z: -10 },
+          { x: 30, z: -10 },
+          { x: 30, z: 2 },
+          { x: 0, z: 2 },
+          { x: 0, z: -10 },
+        ],
+      },
+    ])[0];
+    const kinds = planParts(house, [tower]).map((p) => p.kind);
+    expect(kinds.filter((k) => k === 'balcony')).toHaveLength(0);
+  });
+
+  it('still places balconies when the neighbour is lower than the slab', () => {
+    const house = make('house', 30, 4, 43);
+    const low = createBuildings([
+      {
+        id: 44,
+        type: 'garage',
+        name: '',
+        levels: 1,
+        points: [
+          { x: 0, z: -10 },
+          { x: 30, z: -10 },
+          { x: 30, z: 2 },
+          { x: 0, z: 2 },
+          { x: 0, z: -10 },
+        ],
+      },
+    ])[0];
+    const kinds = planParts(house, [low]).map((p) => p.kind);
+    expect(kinds.filter((k) => k === 'balcony').length).toBeGreaterThan(0);
+  });
+});
+
+describe('dormers', () => {
+  it('sits 1-2 dormers on the roof slope of a house with a gable roof', () => {
+    const parts = planParts(make('house', 30, 2, 27));
+    const kinds = parts.map((p) => p.kind);
+    expect(kinds).toContain('gableRoof');
+    const roof = parts.find((p) => p.kind === 'gableRoof')!;
+    const dormers = parts.filter((p) => p.kind === 'dormer');
+    expect(dormers.length).toBeGreaterThanOrEqual(1);
+    expect(dormers.length).toBeLessThanOrEqual(2);
+    for (const dormer of dormers) {
+      expect(dormer.y).toBeGreaterThan(roof.y + roof.sy / 2);
+      const distToRidge =
+        Math.abs(
+          (dormer.x - roof.x) * Math.cos(roof.yaw) -
+            (dormer.z - roof.z) * Math.sin(roof.yaw),
+        );
+      expect(distToRidge).toBeGreaterThan(0.5);
+    }
+  });
+
+  it('places no dormer on a house without a gable roof', () => {
+    const shed = planParts(make('shed', 6, 1, 29));
+    expect(shed.filter((p) => p.kind === 'dormer')).toHaveLength(0);
   });
 });

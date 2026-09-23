@@ -1,6 +1,7 @@
 import { TrackData } from './sim/track';
 import { CarSpec } from './sim/car-spec';
 import { PropSpec } from './sim/prop-spec';
+import { BuildingAssignments, BuildingPlacement, BuildingSpec } from './sim/building-spec';
 
 export interface InputFrame {
   throttle: number;
@@ -22,4 +23,10 @@ export interface CarSource {
 
 export interface PropSource {
   loadProps(): Promise<PropSpec[]>;
+}
+
+export interface BuildingSource {
+  loadBuildings(): Promise<BuildingSpec[]>;
+  loadPlacements(): Promise<BuildingPlacement[]>;
+  loadAssignments(): Promise<BuildingAssignments>;
 }

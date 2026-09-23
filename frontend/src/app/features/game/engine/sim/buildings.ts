@@ -13,6 +13,7 @@ export interface RawBuilding {
 
 export interface Building {
   id: number;
+  type: string;
   style: BuildingStyle;
   floors: number;
   height: number;
@@ -155,6 +156,7 @@ export function createBuildings(raw: RawBuilding[]): Building[] {
       item.height != null && item.height >= 1 && isFinite(item.height) ? item.height : null;
     built.push({
       id: item.id,
+      type: item.type.toLowerCase(),
       style: styleFor(item.type, floors),
       floors,
       height: surveyedHeight ?? floors * FLOOR_HEIGHT,
@@ -208,6 +210,24 @@ export class BuildingGrid {
 
   buildingsIn(key: string): Building[] {
     return this.tiles.get(key) ?? [];
+  }
+
+  near(x: number, z: number, radius: number): Building[] {
+    const out: Building[] = [];
+    const minCx = Math.floor((x - radius) / TILE_SIZE);
+    const maxCx = Math.floor((x + radius) / TILE_SIZE);
+    const minCz = Math.floor((z - radius) / TILE_SIZE);
+    const maxCz = Math.floor((z + radius) / TILE_SIZE);
+    for (let cx = minCx; cx <= maxCx; cx++) {
+      for (let cz = minCz; cz <= maxCz; cz++) {
+        const bucket = this.tiles.get(tileKey(cx, cz));
+        if (!bucket) continue;
+        for (const b of bucket) {
+          if (Math.hypot(b.centroid.x - x, b.centroid.z - z) <= radius) out.push(b);
+        }
+      }
+    }
+    return out;
   }
 
   tileCentre(key: string): { x: number; z: number } {

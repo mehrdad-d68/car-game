@@ -12,6 +12,7 @@ import {
 import { environment } from '../../../environments/environment';
 import { InputService } from '../../core/services/input.service';
 import { BackendCarSource } from './adapters/backend-car-source';
+import { BackendBuildingSource } from './adapters/backend-building-source';
 import { BackendPropSource } from './adapters/backend-prop-source';
 import { BackendTrackSource } from './adapters/backend-track-source';
 import { KeyboardInput } from './adapters/keyboard-input';
@@ -57,6 +58,7 @@ export class GameComponent implements AfterViewInit, OnDestroy {
       new BackendTrackSource(this.http, this.destroyRef),
       new BackendCarSource(this.http, this.destroyRef),
       new BackendPropSource(this.http, this.destroyRef),
+      new BackendBuildingSource(this.http, this.destroyRef),
     );
     if (this.destroyed) {
       this.engine.dispose();

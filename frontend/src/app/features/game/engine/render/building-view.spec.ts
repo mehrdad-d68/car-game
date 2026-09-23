@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BuildingGrid, createBuildings } from '../sim/buildings';
 import { createTrack } from '../sim/track';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
-import { BUILD_RADIUS, BuildingView, DROP_RADIUS } from './building-view';
+import { BUILD_RADIUS, BuildingView, DROP_RADIUS, NEARBY_RADIUS } from './building-view';
 import { createBuildingTextures } from './building-textures';
 import { appendBuilding, emptyMeshArrays } from './building-geometry';
 import { PART_KINDS, planParts, PartKind } from './detail-kit';
@@ -137,7 +137,10 @@ describe('BuildingView', () => {
       let expected = 0;
       for (const key of view.builtTiles) {
         for (const building of grid.buildingsIn(key)) {
-          for (const part of planParts(building)) {
+          for (const part of planParts(
+            building,
+            grid.near(building.centroid.x, building.centroid.z, NEARBY_RADIUS),
+          )) {
             if (part.kind === kind) expected += 1;
           }
         }
@@ -169,7 +172,10 @@ describe('BuildingView', () => {
       let expected = 0;
       for (const key of view.builtTiles) {
         for (const building of grid.buildingsIn(key)) {
-          for (const part of planParts(building)) {
+          for (const part of planParts(
+            building,
+            grid.near(building.centroid.x, building.centroid.z, NEARBY_RADIUS),
+          )) {
             if (part.kind === kind) expected += 1;
           }
         }
@@ -228,7 +234,7 @@ describe('BuildingView', () => {
   it('resolves a raycast on the second of two buildings to its own id', () => {
     const buildings = createBuildings([
       {
-        id: 101,
+        id: 844221264,
         type: 'house',
         name: '',
         points: [
@@ -236,7 +242,7 @@ describe('BuildingView', () => {
         ],
       },
       {
-        id: 202,
+        id: 844221274,
         type: 'house',
         name: '',
         points: [
@@ -249,7 +255,7 @@ describe('BuildingView', () => {
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(arrays.positions, 3));
-    geometry.setAttribute('buildingId', new THREE.Float32BufferAttribute(arrays.buildingIds, 1));
+    geometry.setAttribute('buildingId', new THREE.Int32BufferAttribute(arrays.buildingIds, 1));
     geometry.setIndex(arrays.indices);
     geometry.computeBoundingSphere();
 
@@ -264,6 +270,6 @@ describe('BuildingView', () => {
     const hit = firstHit(camera, 0, 0, [mesh]);
     expect(hit).not.toBeNull();
     expect(hit!.vertex).toEqual(expect.any(Number));
-    expect(BuildingView.buildingIdAtVertex(mesh, hit!.vertex!)).toBe(202);
+    expect(BuildingView.buildingIdAtVertex(mesh, hit!.vertex!)).toBe(844221274);
   });
 });

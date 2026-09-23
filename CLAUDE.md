@@ -57,6 +57,11 @@ plans/002-...
 Before creating a plan, list `plans/` and take the next unused number. Never
 renumber or overwrite an existing plan — supersede it with a new one.
 
+**"implement the plan" means the last plan file.** When asked to implement, build,
+or continue "the plan" without a number or title, list `plans/` and take the
+**highest-numbered** file. Never an earlier one, and never several at once. If that
+plan is already implemented, say so and stop instead of picking the one before it.
+
 ## Code reviews live in `code-review.md`
 
 **`code-review.md`** (root of the repository) is the single home for code review

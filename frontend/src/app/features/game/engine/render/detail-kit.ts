@@ -1,5 +1,12 @@
 import { Building, FLOOR_HEIGHT } from '../sim/buildings';
 import { Vec2 } from '../sim/types';
+import {
+  frameX,
+  frameZ,
+  insideRing,
+  longestEdgeIndex,
+  roofFrame,
+} from '../sim/footprint';
 
 export type PartKind =
   | 'gableRoof'
@@ -12,8 +19,10 @@ export type PartKind =
   | 'acBox'
   | 'awning'
   | 'sign'
-  | 'window'
-  | 'door';
+  | 'balcony'
+  | 'balustrade'
+  | 'balconyDoor'
+  | 'dormer';
 
 export const PART_KINDS: readonly PartKind[] = [
   'gableRoof',
@@ -26,8 +35,10 @@ export const PART_KINDS: readonly PartKind[] = [
   'acBox',
   'awning',
   'sign',
-  'window',
-  'door',
+  'balcony',
+  'balustrade',
+  'balconyDoor',
+  'dormer',
 ];
 
 export interface PartPlacement {
@@ -54,188 +65,162 @@ function rng(seed: number): () => number {
 const PARAPET_HEIGHT = 0.8;
 const PARAPET_THICKNESS = 0.3;
 
-export const WINDOW_WIDTH = 1.4;
-export const WINDOW_HEIGHT = 1.8;
-export const WINDOW_SPACING = 3.2;
-export const WINDOW_INSET = 0.9;
-export const WINDOW_SILL = 1.0;
-export const DOOR_HEIGHT = 2.2;
-export const DOOR_WIDTH = 1.1;
-export const DOOR_CLEAR = 0.5;
+const BALCONY_INSET = 1.2;
+const BALCONY_WIDTH = 2.4;
+const BALCONY_DEPTH = 1.5;
+const BALCONY_EMBED = 0.05;
+const BALCONY_SLAB_THICKNESS = 0.14;
+const BALCONY_SILL = 0.2;
+const GUARD_HEIGHT = 1.0;
+const GUARD_THICKNESS = 0.08;
+const DOOR_WIDTH = 0.9;
+const DOOR_HEIGHT = 2.2;
+const DOOR_THICKNESS = 0.1;
+const DOOR_OFFSET = 0.02;
 
-const MIN_ROOF_FILL = 0.85;
-const ROOF_CORNER_SLACK = 1;
-
-function longestEdgeIndex(ring: Vec2[]): number {
-  let index = 0;
-  let longest = -1;
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % ring.length];
-    const len = Math.hypot(b.x - a.x, b.z - a.z);
-    if (len > longest) {
-      longest = len;
-      index = i;
+function balconyObscured(
+  building: Building,
+  a: Vec2,
+  ux: number,
+  uz: number,
+  t: number,
+  slabY: number,
+  nearby: Building[],
+): boolean {
+  const slabMinDepth = -BALCONY_EMBED;
+  const slabMaxDepth = BALCONY_DEPTH - BALCONY_EMBED;
+  const corners: Vec2[] = [];
+  for (const sign of [-1, 1]) {
+    for (const depth of [slabMinDepth, slabMaxDepth]) {
+      const along = t + sign * (BALCONY_WIDTH / 2) - 0.05;
+      corners.push({
+        x: a.x + ux * along + uz * depth,
+        z: a.z + uz * along - ux * depth,
+      });
     }
   }
-  return index;
-}
-
-function insideRing(x: number, z: number, ring: Vec2[]): boolean {
-  let hit = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const a = ring[i];
-    const b = ring[j];
-    if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) hit = !hit;
-  }
-  return hit;
-}
-
-function nearRing(x: number, z: number, ring: Vec2[], slack: number): boolean {
-  if (insideRing(x, z, ring)) return true;
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % ring.length];
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
-    if (Math.hypot(x - a.x - dx * t, z - a.z - dz * t) <= slack) return true;
+  for (const nb of nearby) {
+    if (nb.id === building.id) continue;
+    if (nb.height < slabY - 0.1) continue;
+    if (corners.some((p) => insideRing(p.x, p.z, nb.points))) return true;
   }
   return false;
 }
 
-// A rectangle aligned with the longest wall. A box part with this yaw has its local Z along
-// that wall, so `along` goes in sz and `across` in sx.
-interface RoofFrame {
-  cx: number;
-  cz: number;
-  ux: number;
-  uz: number;
-  yaw: number;
-  along: number;
-  across: number;
-  fits: boolean;
-}
-
-function roofFrame(building: Building): RoofFrame {
+function placeBalconies(
+  building: Building,
+  r: () => number,
+  nearby: Building[] = [],
+): PartPlacement[] {
+  const out: PartPlacement[] = [];
+  if (building.style !== 'home' && building.style !== 'apartment') return out;
   const ring = building.points;
+  const floors = building.style === 'apartment' ? Math.min(building.floors, 5) : building.floors;
+  if (floors < 2) return out;
+
   const i = longestEdgeIndex(ring);
   const a = ring[i];
   const b = ring[(i + 1) % ring.length];
-  const len = Math.hypot(b.x - a.x, b.z - a.z);
-  const ux = (b.x - a.x) / len;
-  const uz = (b.z - a.z) / len;
-  let minS = Infinity;
-  let maxS = -Infinity;
-  let minT = Infinity;
-  let maxT = -Infinity;
-  for (const p of ring) {
-    const s = p.x * ux + p.z * uz;
-    const t = -p.x * uz + p.z * ux;
-    minS = Math.min(minS, s);
-    maxS = Math.max(maxS, s);
-    minT = Math.min(minT, t);
-    maxT = Math.max(maxT, t);
-  }
-  const s0 = (minS + maxS) / 2;
-  const t0 = (minT + maxT) / 2;
-  const along = maxS - minS;
-  const across = maxT - minT;
-  const frame: RoofFrame = {
-    cx: s0 * ux - t0 * uz,
-    cz: s0 * uz + t0 * ux,
-    ux,
-    uz,
-    yaw: Math.atan2(ux, uz),
-    along,
-    across,
-    fits: false,
-  };
-  const hs = along / 2;
-  const ht = across / 2;
-  frame.fits =
-    building.area / (along * across) >= MIN_ROOF_FILL &&
-    [[-hs, -ht], [hs, -ht], [hs, ht], [-hs, ht]].every(([s, t]) =>
-      nearRing(frameX(frame, s, t), frameZ(frame, s, t), ring, ROOF_CORNER_SLACK),
-    );
-  return frame;
-}
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-6) return out;
+  const ux = dx / len;
+  const uz = dz / len;
+  const yaw = Math.atan2(dx, dz);
 
-function frameX(f: RoofFrame, s: number, t: number): number {
-  return f.cx + f.ux * s - f.uz * t;
-}
-
-function frameZ(f: RoofFrame, s: number, t: number): number {
-  return f.cz + f.uz * s + f.ux * t;
-}
-
-function placeFacade(building: Building): PartPlacement[] {
-  const out: PartPlacement[] = [];
-  const ring = building.points;
-  if (ring.length < 3) return out;
-
-  const longestIndex = longestEdgeIndex(ring);
-
-  const withWindows = building.style !== 'hut';
-  const doorWidth = building.style === 'hut' || building.style === 'works' ? 2.4 : DOOR_WIDTH;
-  const firstFloor =
-    building.style === 'shop' ? 1 : 0;
-
-  for (let i = 0; i < ring.length; i++) {
-    const a = ring[i];
-    const b = ring[(i + 1) % ring.length];
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    const len = Math.hypot(dx, dz);
-    if (len < 1e-6) continue;
-    const ux = dx / len;
-    const uz = dz / len;
-    const yaw = Math.atan2(dx, dz);
-
-    if (withWindows) {
-      const available = len - 2 * WINDOW_INSET;
-      if (available >= WINDOW_WIDTH) {
-        const perEdge = Math.floor(available / WINDOW_SPACING) + 1;
-        const slot = available / perEdge;
-        for (let floor = firstFloor; floor < building.floors; floor++) {
-          const y = floor * FLOOR_HEIGHT + WINDOW_SILL + WINDOW_HEIGHT / 2;
-          for (let k = 0; k < perEdge; k++) {
-            const t = WINDOW_INSET + k * slot;
-            if (i === longestIndex && Math.abs(t - len / 2) < doorWidth / 2 + DOOR_CLEAR) {
-              continue;
-            }
-            out.push({
-              kind: 'window',
-              x: a.x + ux * t + uz * 0.03,
-              y,
-              z: a.z + uz * t - ux * 0.03,
-              yaw,
-              sx: 0.1,
-              sy: WINDOW_HEIGHT,
-              sz: WINDOW_WIDTH,
-            });
-          }
-        }
-      }
-    }
-
-    if (i === longestIndex) {
+  const perEdge = Math.min(3, Math.max(1, Math.floor(len / 6)));
+  const chunk = (len - 2 * BALCONY_INSET) / perEdge;
+  const slabOffset = BALCONY_DEPTH / 2 - BALCONY_EMBED;
+  const guardOffset = BALCONY_DEPTH - BALCONY_EMBED - GUARD_THICKNESS / 2;
+  for (let k = 0; k < perEdge; k++) {
+    const t = BALCONY_INSET + chunk * (k + 0.5);
+    const floor = 1 + Math.floor(r() * (floors - 1));
+    const slabY = floor * FLOOR_HEIGHT + BALCONY_SILL;
+    if (balconyObscured(building, a, ux, uz, t, slabY, nearby)) continue;
+    const slabTop = slabY + BALCONY_SLAB_THICKNESS / 2;
+    out.push({
+      kind: 'balcony',
+      x: a.x + ux * t + uz * slabOffset,
+      y: slabY,
+      z: a.z + uz * t - ux * slabOffset,
+      yaw,
+      sx: BALCONY_DEPTH,
+      sy: BALCONY_SLAB_THICKNESS,
+      sz: BALCONY_WIDTH,
+    });
+    out.push({
+      kind: 'balustrade',
+      x: a.x + ux * t + uz * guardOffset,
+      y: slabTop + GUARD_HEIGHT / 2,
+      z: a.z + uz * t - ux * guardOffset,
+      yaw,
+      sx: GUARD_THICKNESS,
+      sy: GUARD_HEIGHT,
+      sz: BALCONY_WIDTH - 0.2,
+    });
+    const sideYaw = yaw + Math.PI / 2;
+    for (const side of [-1, 1]) {
+      const tSide = t + (side * (BALCONY_WIDTH / 2 - GUARD_THICKNESS / 2 - 0.02));
       out.push({
-        kind: 'door',
-        x: a.x + ux * (len / 2),
-        y: DOOR_HEIGHT / 2,
-        z: a.z + uz * (len / 2),
-        yaw,
-        sx: 0.12,
-        sy: DOOR_HEIGHT,
-        sz: doorWidth,
+        kind: 'balustrade',
+        x: a.x + ux * tSide + uz * slabOffset,
+        y: slabTop + GUARD_HEIGHT / 2,
+        z: a.z + uz * tSide - ux * slabOffset,
+        yaw: sideYaw,
+        sx: GUARD_THICKNESS,
+        sy: GUARD_HEIGHT,
+        sz: BALCONY_DEPTH - BALCONY_EMBED,
       });
     }
+    out.push({
+      kind: 'balconyDoor',
+      x: a.x + ux * t + uz * DOOR_OFFSET,
+      y: floor * FLOOR_HEIGHT + 0.2 + DOOR_HEIGHT / 2,
+      z: a.z + uz * t - ux * DOOR_OFFSET,
+      yaw,
+      sx: DOOR_THICKNESS,
+      sy: DOOR_HEIGHT,
+      sz: DOOR_WIDTH,
+    });
   }
   return out;
 }
 
-export function planParts(building: Building): PartPlacement[] {
+const DORMER_WIDTH = 1.8;
+const DORMER_EMBED = 0.15;
+
+function placeDormers(
+  building: Building,
+  r: () => number,
+  gableSy: number,
+): PartPlacement[] {
+  const out: PartPlacement[] = [];
+  const f = roofFrame(building);
+  if (building.style !== 'home' || !f.fits) return out;
+  const count = 1 + (r() < 0.5 ? 1 : 0);
+  const span = Math.max(f.along - DORMER_WIDTH, 0);
+  const chunk = span / count;
+  const roofTop = building.height + gableSy / 2;
+  const tBase = Math.max(f.across / 2 - DORMER_WIDTH / 2 - 0.6, 0);
+  for (let k = 0; k < count; k++) {
+    const s = -span / 2 + chunk * (k + 0.5);
+    const t = (k % 2 === 0 ? 1 : -1) * tBase;
+    out.push({
+      kind: 'dormer',
+      x: frameX(f, s, t),
+      y: roofTop - DORMER_EMBED + 1.4 / 2,
+      z: frameZ(f, s, t),
+      yaw: f.yaw,
+      sx: 1.0,
+      sy: 1.4,
+      sz: DORMER_WIDTH,
+    });
+  }
+  return out;
+}
+
+export function planParts(building: Building, nearby: Building[] = []): PartPlacement[] {
   const r = rng(building.seed);
   const ring = building.points;
   const f = roofFrame(building);
@@ -243,7 +228,9 @@ export function planParts(building: Building): PartPlacement[] {
 
   switch (building.style) {
     case 'home': {
+      let gableSy = 0;
       if (f.fits) {
+        gableSy = 2 + r() * 1.5;
         parts.push({
           kind: 'gableRoof',
           x: f.cx,
@@ -251,10 +238,11 @@ export function planParts(building: Building): PartPlacement[] {
           z: f.cz,
           yaw: f.yaw,
           sx: f.across,
-          sy: 2 + r() * 1.5,
+          sy: gableSy,
           sz: f.along,
         });
       }
+      parts.push(...placeDormers(building, r, gableSy));
       if (r() < 0.6) {
         const x = frameX(f, -0.2 * f.along, 0);
         const z = frameZ(f, -0.2 * f.along, 0);
@@ -262,9 +250,11 @@ export function planParts(building: Building): PartPlacement[] {
           parts.push({ kind: 'chimney', x, y: building.height + 0.5, z, yaw: f.yaw, sx: 0.6, sy: 1.2, sz: 0.6 });
         }
       }
+      parts.push(...placeBalconies(building, r, nearby));
       break;
     }
     case 'apartment': {
+      parts.push(...placeBalconies(building, r, nearby));
       const t = PARAPET_THICKNESS;
       for (let i = 0; i < ring.length; i++) {
         const a = ring[i];
@@ -367,6 +357,5 @@ export function planParts(building: Building): PartPlacement[] {
     }
   }
 
-  parts.push(...placeFacade(building));
   return parts;
 }

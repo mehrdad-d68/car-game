@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { FixedStepLoop } from './loop';
-import { CarSource, InputSource, PropSource, TrackSource } from './ports';
-import { BuildingView } from './render/building-view';
+import { CarSource, BuildingSource, InputSource, PropSource, TrackSource } from './ports';
+import { BuildingView, BuildingCatalogInput } from './render/building-view';
 import { CameraRig } from './render/camera-rig';
 import { createBuildingTextures } from './render/building-textures';
 import { CarView } from './render/car-view';
@@ -9,6 +9,7 @@ import { DebugPins, Pin } from './render/debug-pins';
 import type { PartKind } from './render/detail-kit';
 import { FeatureView } from './render/feature-view';
 import { clearModelCache, disposeModel, loadCarModel } from './render/model-loader';
+import { loadBuildingModels } from './render/building-models';
 import { firstHit, groundPoint } from './render/picker';
 import { loadPresentModels, presentPropKinds } from './render/prop-models';
 import { compileMaterials } from './render/prepare-scene';
@@ -18,6 +19,7 @@ import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
 import { Viewport } from './render/viewport';
 import { CarModel, CarSpec } from './sim/car-spec';
+import { BuildingAssignments, BuildingAssignment, BuildingPlacement, BuildingSpec } from './sim/building-spec';
 import { FEATURE_LABELS, inspectPoint, formatReport, nearestRoadHeading } from './sim/inspect';
 import type { InspectReport, ReportExtras } from './sim/inspect';
 import type { StepManeuver } from './sim/route-steps';
@@ -93,6 +95,10 @@ export class Engine {
   readonly cars: CarSpec[];
   private readonly props: PropSpec[];
   private propModels: ReadonlyMap<MapItemKind, THREE.Group>;
+  private readonly buildings: BuildingSpec[];
+  private readonly buildingModelGroups: ReadonlyMap<string, THREE.Group>;
+  private readonly baseAssignments: BuildingAssignments;
+  private readonly workingOverrides: BuildingAssignments = {};
 
   get activeCar(): CarSpec {
     return this.activeCarSpec;
@@ -106,12 +112,19 @@ export class Engine {
     carSpec: CarSpec,
     props: PropSpec[],
     propModels: ReadonlyMap<MapItemKind, THREE.Group>,
+    buildings: BuildingSpec[],
+    buildingPlacements: BuildingPlacement[],
+    buildingAssignments: BuildingAssignments,
+    buildingModelGroups: ReadonlyMap<string, THREE.Group>,
     modelGroup?: THREE.Group,
   ) {
     this.track = track;
     this.cars = cars;
     this.props = props;
     this.propModels = propModels;
+    this.buildings = buildings;
+    this.buildingModelGroups = buildingModelGroups;
+    this.baseAssignments = buildingAssignments;
     this.handling = carSpec.handling;
     this.activeCarSpec = carSpec;
     const built: SceneSetup = createScene();
@@ -127,10 +140,23 @@ export class Engine {
     this.trackView = new TrackView(track);
     this.trackView.buildLabels();
     this.featureView = new FeatureView(track, props, propModels);
+    const catalog: BuildingCatalogInput = {
+      specs: buildings,
+      placements: buildingPlacements,
+      assignments: buildingAssignments,
+    };
     this.buildingView = new BuildingView(
       track.buildings,
-      createBuildingTextures(() => document.createElement('canvas').getContext('2d')),
+      createBuildingTextures((width, height) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas.getContext('2d');
+      }),
+      undefined,
+      catalog,
     );
+    this.buildingView.setModels(buildingModelGroups);
     this.buildingView.update(track.spawn.position.x, track.spawn.position.z);
     this.routeArrow = new RouteArrow();
     this.scene.add(
@@ -160,14 +186,27 @@ export class Engine {
     trackSource: TrackSource,
     carSource: CarSource,
     propSource: PropSource,
+    buildingSource: BuildingSource,
     carId: string = DEFAULT_CAR_ID,
   ): Promise<Engine> {
-    const [track, cars, props] = await Promise.all([
+    const [track, cars, props, buildings, buildingPlacements, buildingAssignments] = await Promise.all([
       trackSource.loadTrack(),
       carSource.loadCars(),
       propSource.loadProps().catch((error: unknown) => {
         console.warn('Failed to load prop catalog; rendering without props', error);
         return [] as PropSpec[];
+      }),
+      buildingSource.loadBuildings().catch((error: unknown) => {
+        console.warn('Failed to load building catalog; rendering procedurally', error);
+        return [] as BuildingSpec[];
+      }),
+      buildingSource.loadPlacements().catch((error: unknown) => {
+        console.warn('Failed to load building placements; using none', error);
+        return [] as BuildingPlacement[];
+      }),
+      buildingSource.loadAssignments().catch((error: unknown) => {
+        console.warn('Failed to load building assignments; rendering procedurally', error);
+        return {} as BuildingAssignments;
       }),
     ]);
     if (cars.length === 0) {
@@ -178,7 +217,21 @@ export class Engine {
     const modelGroup = spec.model
       ? await Engine.loadModel(spec.model)
       : undefined;
-    const engine = new Engine(container, input, track, cars, spec, props, propModels, modelGroup);
+    const buildingModelGroups = await loadBuildingModels(buildings);
+    const engine = new Engine(
+      container,
+      input,
+      track,
+      cars,
+      spec,
+      props,
+      propModels,
+      buildings,
+      buildingPlacements,
+      buildingAssignments,
+      buildingModelGroups,
+      modelGroup,
+    );
     await engine.compileScene();
     return engine;
   }
@@ -264,7 +317,7 @@ export class Engine {
     }
   }
 
-  inspectAt(clientX: number, clientY: number): { report: InspectReport; hit: string | null } | null {
+  inspectAt(clientX: number, clientY: number): { report: InspectReport; hit: string | null; buildingId: number | null } | null {
     if (!this.inspectActive) return null;
     if (this.pinRecords.size >= MAX_PINS) return null;
 
@@ -277,8 +330,9 @@ export class Engine {
     if (!point) return null;
 
     const report = inspectPoint(this.track, this.graph, point.x, point.z);
-    const hit = this.describeHit(ndcX, ndcY);
-    this.pinHit = hit;
+    const described = this.describeHit(ndcX, ndcY);
+    this.pinHit = described?.label ?? null;
+    const buildingId = described?.buildingId ?? null;
 
     const pin = this.lastPinIndex + 1;
     this.lastPinIndex = pin;
@@ -293,7 +347,7 @@ export class Engine {
     }
     this.debugPins.set(pins);
 
-    return { report, hit };
+    return { report, hit: described?.label ?? null, buildingId };
   }
 
   reportText(pin: number): string | null {
@@ -343,7 +397,10 @@ export class Engine {
     };
   }
 
-  private describeHit(ndcX: number, ndcY: number): string | null {
+  private describeHit(
+    ndcX: number,
+    ndcY: number,
+  ): { label: string; buildingId: number | null } | null {
     const hit = firstHit(this.rig.camera, ndcX, ndcY, [
       this.trackView.group,
       this.featureView.group,
@@ -364,21 +421,32 @@ export class Engine {
         hit.object.geometry.getAttribute('normal') &&
         hit.object.geometry.getAttribute('normal').getY(vertex) > 0.5;
       const surface = up ? 'roof' : 'wall';
-      return buildingId === null ? `${surface}` : `building #${buildingId} ${surface}`;
+      return buildingId === null
+        ? { label: surface, buildingId: null }
+        : { label: `building #${buildingId} ${surface}`, buildingId };
     }
 
     if (tag.kind === 'part') {
-      const buildingId =
+      const partBuildingId =
         hit.instanceId !== undefined
-          ? this.buildingView.buildingIdAt(tag.partKind as PartKind, hit.instanceId)
+          ? this.buildingView.buildingIdAt(
+              tag.partKind as PartKind | 'catalog',
+              hit.instanceId,
+              hit.object,
+            )
           : null;
-      return buildingId === null ? 'part' : `building #${buildingId} part`;
+      if (partBuildingId === null) return { label: 'part', buildingId: null };
+      if (partBuildingId < 0) return { label: 'placed building part', buildingId: null };
+      return { label: `building #${partBuildingId} part`, buildingId: partBuildingId };
     }
 
-    if (tag.kind === 'car') return 'car';
-    if (tag.kind === 'ground') return 'ground';
-    if (tag.kind === 'road') return 'road';
-    return FEATURE_LABELS[tag.kind as MapItemKind] ?? `${tag.kind}`;
+    if (tag.kind === 'car') return { label: 'car', buildingId: null };
+    if (tag.kind === 'ground') return { label: 'ground', buildingId: null };
+    if (tag.kind === 'road') return { label: 'road', buildingId: null };
+    return {
+      label: FEATURE_LABELS[tag.kind as MapItemKind] ?? `${tag.kind}`,
+      buildingId: null,
+    };
   }
 
   private findInspectTag(object: THREE.Object3D): { kind: string; partKind?: string } | null {
@@ -391,6 +459,39 @@ export class Engine {
       current = current.parent;
     }
     return null;
+  }
+
+  get buildingDesigns(): BuildingSpec[] {
+    return this.buildings;
+  }
+
+  buildingDesign(buildingId: number): BuildingSpec | null {
+    const entry = this.effectiveAssignment(buildingId);
+    if (!entry || entry.spec === null) return null;
+    return this.buildings.find((spec) => spec.id === entry.spec) ?? null;
+  }
+
+  private effectiveAssignment(buildingId: number): BuildingAssignment | undefined {
+    const key = String(buildingId);
+    return this.workingOverrides[key] ?? this.baseAssignments[key];
+  }
+
+  workingOverride(buildingId: number): BuildingAssignment | undefined {
+    return this.workingOverrides[String(buildingId)];
+  }
+
+  setBuildingOverride(buildingId: number, override: BuildingAssignment | null): void {
+    const key = String(buildingId);
+    if (override === null) {
+      delete this.workingOverrides[key];
+    } else {
+      this.workingOverrides[key] = override;
+    }
+    this.buildingView.applyAssignment(buildingId, this.effectiveAssignment(buildingId));
+  }
+
+  workingOverridesJson(): string {
+    return JSON.stringify(this.workingOverrides, null, 2);
   }
 
   teleportTo(x: number, z: number, heading: number): void {
@@ -513,6 +614,9 @@ export class Engine {
     this.debugPins.dispose();
     this.viewport.dispose();
     for (const group of this.propModels.values()) {
+      disposeModel(group);
+    }
+    for (const group of this.buildingModelGroups.values()) {
       disposeModel(group);
     }
     if (this.sky instanceof THREE.Texture) {
