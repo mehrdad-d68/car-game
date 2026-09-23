@@ -1,4 +1,5 @@
-export type PartMaterial = 'wall' | 'glass' | 'roof' | 'trim' | 'door' | 'shopfront';
+export type PartMaterial =
+  'wall' | 'glass' | 'roof' | 'trim' | 'door' | 'shopfront';
 
 export interface BuildingPart {
   name: string;

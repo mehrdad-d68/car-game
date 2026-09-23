@@ -41,11 +41,26 @@ describe('PropsService', () => {
   });
 
   it('exposes a footprint for scaled kinds', () => {
-    expect(service.findOne('busStop')!.footprint).toEqual({ width: 1.7, depth: 1.0 });
-    expect(service.findOne('gasStation')!.footprint).toEqual({ width: 8, depth: 6 });
-    expect(service.findOne('fireStation')!.footprint).toEqual({ width: 10, depth: 8 });
-    expect(service.findOne('hospital')!.footprint).toEqual({ width: 10, depth: 8 });
-    expect(service.findOne('policeStation')!.footprint).toEqual({ width: 10, depth: 8 });
+    expect(service.findOne('busStop')!.footprint).toEqual({
+      width: 1.7,
+      depth: 1.0,
+    });
+    expect(service.findOne('gasStation')!.footprint).toEqual({
+      width: 8,
+      depth: 6,
+    });
+    expect(service.findOne('fireStation')!.footprint).toEqual({
+      width: 10,
+      depth: 8,
+    });
+    expect(service.findOne('hospital')!.footprint).toEqual({
+      width: 10,
+      depth: 8,
+    });
+    expect(service.findOne('policeStation')!.footprint).toEqual({
+      width: 10,
+      depth: 8,
+    });
   });
 
   it('has no model entries yet, so no kind resolves a model path', () => {

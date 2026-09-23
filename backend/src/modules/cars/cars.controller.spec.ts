@@ -28,7 +28,8 @@ describe('CarsController', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toBe('model/gltf-binary');
     expect(res.headers['etag']).toBeDefined();
-    expect(res.body.length).toBe(677696);
+    const body = res.body as Buffer;
+    expect(body.length).toBe(677696);
   });
 
   it('returns 404 for an unknown car', async () => {

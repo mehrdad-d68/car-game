@@ -1,6 +1,16 @@
 import { CarSpec } from '../car-spec';
 
-function lamp(width: number, height: number, length: number, color: number, emissive: number, emissiveIntensity: number, z: number): CarSpec['appearance']['headlight'] & { positions: [number, number, number][] } {
+function lamp(
+  width: number,
+  height: number,
+  length: number,
+  color: number,
+  emissive: number,
+  emissiveIntensity: number,
+  z: number,
+): CarSpec['appearance']['headlight'] & {
+  positions: [number, number, number][];
+} {
   return {
     width,
     height,
@@ -29,8 +39,20 @@ export const CAR_SPECS: CarSpec[] = [
       maxReverseSpeed: 8,
     },
     appearance: {
-      body: { width: 1.8, height: 0.5, length: 3.6, color: 0xd32f2f, position: [0, 0.35, 0] },
-      cabin: { width: 1.4, height: 0.45, length: 1.6, color: 0x90caf9, position: [0, 0.85, -0.2] },
+      body: {
+        width: 1.8,
+        height: 0.5,
+        length: 3.6,
+        color: 0xd32f2f,
+        position: [0, 0.35, 0],
+      },
+      cabin: {
+        width: 1.4,
+        height: 0.45,
+        length: 1.6,
+        color: 0x90caf9,
+        position: [0, 0.85, -0.2],
+      },
       wheel: {
         radius: 0.32,
         width: 0.25,
@@ -59,8 +81,20 @@ export const CAR_SPECS: CarSpec[] = [
       maxReverseSpeed: 8,
     },
     appearance: {
-      body: { width: 1.9, height: 0.45, length: 3.8, color: 0x1565c0, position: [0, 0.325, 0] },
-      cabin: { width: 1.3, height: 0.4, length: 1.5, color: 0x90caf9, position: [0, 0.825, -0.25] },
+      body: {
+        width: 1.9,
+        height: 0.45,
+        length: 3.8,
+        color: 0x1565c0,
+        position: [0, 0.325, 0],
+      },
+      cabin: {
+        width: 1.3,
+        height: 0.4,
+        length: 1.5,
+        color: 0x90caf9,
+        position: [0, 0.825, -0.25],
+      },
       wheel: {
         radius: 0.34,
         width: 0.28,
@@ -89,8 +123,20 @@ export const CAR_SPECS: CarSpec[] = [
       maxReverseSpeed: 6,
     },
     appearance: {
-      body: { width: 2.1, height: 0.7, length: 4.2, color: 0x558b2f, position: [0, 0.45, 0] },
-      cabin: { width: 1.8, height: 0.5, length: 1.8, color: 0x90caf9, position: [0, 1.0, -0.3] },
+      body: {
+        width: 2.1,
+        height: 0.7,
+        length: 4.2,
+        color: 0x558b2f,
+        position: [0, 0.45, 0],
+      },
+      cabin: {
+        width: 1.8,
+        height: 0.5,
+        length: 1.8,
+        color: 0x90caf9,
+        position: [0, 1.0, -0.3],
+      },
       wheel: {
         radius: 0.38,
         width: 0.3,

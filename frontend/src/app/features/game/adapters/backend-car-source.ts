@@ -1,10 +1,12 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { environment } from '../../../../environments/environment';
 import { CarSource } from '../engine/ports';
 import { CarSpec } from '../engine/sim/car-spec';
+import { withModelApiUrl } from './api-url';
 
-const CARS_URL = '/api/cars';
+const CARS_URL = `${environment.apiUrl}/api/cars`;
 
 export class BackendCarSource implements CarSource {
   constructor(
@@ -18,7 +20,7 @@ export class BackendCarSource implements CarSource {
         .get<CarSpec[]>(CARS_URL)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: (cars) => resolve(cars),
+          next: (cars) => resolve(cars.map((car) => withModelApiUrl(car))),
           error: (err) => reject(err),
         });
     });

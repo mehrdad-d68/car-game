@@ -6,7 +6,14 @@ import { BuildingsService } from './buildings.service';
 import { PartMaterial } from './building-spec';
 import { BUILDING_SPECS } from './data/building-specs';
 
-const MATERIALS: readonly PartMaterial[] = ['wall', 'glass', 'roof', 'trim', 'door', 'shopfront'];
+const MATERIALS: readonly PartMaterial[] = [
+  'wall',
+  'glass',
+  'roof',
+  'trim',
+  'door',
+  'shopfront',
+];
 
 describe('BuildingsController', () => {
   let app: INestApplication;
@@ -28,8 +35,9 @@ describe('BuildingsController', () => {
   it('serves the building catalog', async () => {
     const res = await request(app.getHttpServer()).get('/buildings');
     expect(res.status).toBe(200);
-    expect(res.body).toHaveLength(BUILDING_SPECS.length);
-    expect(res.body[0].parts.length).toBeGreaterThan(0);
+    const catalog = res.body as { parts: unknown[] }[];
+    expect(catalog).toHaveLength(BUILDING_SPECS.length);
+    expect(catalog[0].parts.length).toBeGreaterThan(0);
   });
 
   it('serves placements as an array', async () => {
@@ -39,7 +47,9 @@ describe('BuildingsController', () => {
   });
 
   it('serves assignments as an object keyed by building id', async () => {
-    const res = await request(app.getHttpServer()).get('/buildings/assignments');
+    const res = await request(app.getHttpServer()).get(
+      '/buildings/assignments',
+    );
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(false);
     const ids = Object.keys(res.body as Record<string, unknown>);
@@ -51,8 +61,12 @@ describe('BuildingsController', () => {
   it('serves one building by id', async () => {
     const res = await request(app.getHttpServer()).get('/buildings/house');
     expect(res.status).toBe(200);
-    expect(res.body.id).toBe('house');
-    expect(res.body.footprint.tolerance).toBeGreaterThan(0);
+    const building = res.body as {
+      id: string;
+      footprint: { tolerance: number };
+    };
+    expect(building.id).toBe('house');
+    expect(building.footprint.tolerance).toBeGreaterThan(0);
   });
 
   it('returns 404 for an unknown id', async () => {
@@ -61,7 +75,9 @@ describe('BuildingsController', () => {
   });
 
   it('returns 404 for a known building with no model', async () => {
-    const res = await request(app.getHttpServer()).get('/buildings/house/model');
+    const res = await request(app.getHttpServer()).get(
+      '/buildings/house/model',
+    );
     expect(res.status).toBe(404);
   });
 });

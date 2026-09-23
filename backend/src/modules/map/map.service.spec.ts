@@ -77,7 +77,10 @@ describe('MapService', () => {
     const before = service.getEtag();
     expect(service.getMap().meta.totalRoads).toBe(1);
 
-    writeFileSync(file, JSON.stringify({ meta: { totalRoads: 99 }, roads: [] }));
+    writeFileSync(
+      file,
+      JSON.stringify({ meta: { totalRoads: 99 }, roads: [] }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     expect(service.getMap().meta.totalRoads).toBe(99);

@@ -8,6 +8,7 @@ import {
 } from '@angular/common/http/testing';
 import { DestroyRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { environment } from '../../../../environments/environment';
 import { Observable } from 'rxjs';
 import { BackendBuildingSource } from './backend-building-source';
 import { BuildingAssignments, BuildingSpec } from '../engine/sim/building-spec';
@@ -131,5 +132,22 @@ describe('BackendBuildingSource', () => {
     for (const handler of handlers) handler();
 
     await expect(promise).rejects.toThrow(/disposed/);
+  });
+
+  it('prefixes model urls with the configured api url', async () => {
+    const { controller, create } = setup();
+    const source = create();
+
+    const promise = source.loadBuildings();
+    const req = controller.expectOne('/api/buildings');
+    req.flush([
+      {
+        ...A_BUILDING,
+        model: { url: '/api/buildings/tower/model', targetWidth: 8, yawOffset: 0 },
+      },
+    ]);
+
+    const buildings = await promise;
+    expect(buildings[0].model?.url).toBe(`${environment.apiUrl}/api/buildings/tower/model`);
   });
 });

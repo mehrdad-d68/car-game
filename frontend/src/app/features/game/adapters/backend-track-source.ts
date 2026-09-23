@@ -1,11 +1,12 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { environment } from '../../../../environments/environment';
 import { TrackSource } from '../engine/ports';
 import { OSMMapData } from '../engine/sim/osm-types';
 import { createTrack, TrackData } from '../engine/sim/track';
 
-const MAP_URL = '/api/map';
+const MAP_URL = `${environment.apiUrl}/api/map`;
 
 export class BackendTrackSource implements TrackSource {
   constructor(

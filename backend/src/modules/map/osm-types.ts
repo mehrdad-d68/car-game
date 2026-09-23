@@ -51,9 +51,9 @@ interface MapItemBase<K extends MapItemKind> {
   z: number;
 }
 
-export interface TrafficLightItem extends MapItemBase<'trafficLight'> {}
+export type TrafficLightItem = MapItemBase<'trafficLight'>;
 
-export interface PedestrianCrossingItem extends MapItemBase<'pedestrianCrossing'> {}
+export type PedestrianCrossingItem = MapItemBase<'pedestrianCrossing'>;
 
 export interface AreaFootprint {
   width?: number;
@@ -67,18 +67,14 @@ export interface BusStopItem extends MapItemBase<'busStop'>, AreaFootprint {
 }
 
 export interface StationItem
-  extends MapItemBase<
-      'gasStation' | 'fireStation' | 'hospital' | 'policeStation'
-    >,
+  extends
+    MapItemBase<'gasStation' | 'fireStation' | 'hospital' | 'policeStation'>,
     AreaFootprint {
   name: string;
 }
 
 export type MapItem =
-  | TrafficLightItem
-  | PedestrianCrossingItem
-  | BusStopItem
-  | StationItem;
+  TrafficLightItem | PedestrianCrossingItem | BusStopItem | StationItem;
 
 export interface OSMMapData {
   meta: OSMMeta;

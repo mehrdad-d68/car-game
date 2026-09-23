@@ -1,4 +1,9 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { readFileSync, watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
@@ -53,7 +58,10 @@ export class MapService implements OnModuleInit, OnModuleDestroy {
 
   private scheduleReload(): void {
     if (this.reloadTimer) clearTimeout(this.reloadTimer);
-    this.reloadTimer = setTimeout(() => this.reloadFromDisk(false), RELOAD_DEBOUNCE_MS);
+    this.reloadTimer = setTimeout(
+      () => this.reloadFromDisk(false),
+      RELOAD_DEBOUNCE_MS,
+    );
   }
 
   private reloadFromDisk(strict: boolean): void {
