@@ -8,6 +8,7 @@ import {
 } from '@angular/common/http/testing';
 import { DestroyRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { environment } from '../../../../environments/environment';
 import { BackendCarSource } from './backend-car-source';
 import { CarSpec } from '../engine/sim/car-spec';
 
@@ -104,5 +105,22 @@ describe('BackendCarSource', () => {
     controller.expectOne('/api/cars').error(new ProgressEvent('error'));
 
     await expect(promise).rejects.toBeTruthy();
+  });
+
+  it('prefixes model urls with the configured api url', async () => {
+    const { controller, create } = setup();
+    const source = create();
+
+    const promise = source.loadCars();
+    const req = controller.expectOne('/api/cars');
+    req.flush([
+      {
+        ...A_CAR,
+        model: { url: '/api/cars/coupe/model', targetLength: 4, yawOffset: 0 },
+      },
+    ]);
+
+    const cars = await promise;
+    expect(cars[0].model?.url).toBe(`${environment.apiUrl}/api/cars/coupe/model`);
   });
 });

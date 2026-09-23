@@ -25,8 +25,14 @@ function road(
 describe('mergeRoadWays', () => {
   it('joins two fragments of the same street at a shared endpoint', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }]),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }]),
+      road(1, 'Main', [
+        { x: 0, z: 0 },
+        { x: 10, z: 0 },
+      ]),
+      road(2, 'Main', [
+        { x: 10, z: 0 },
+        { x: 20, z: 0 },
+      ]),
     ]);
     expect(merged).toHaveLength(1);
     expect(merged[0].points).toEqual([
@@ -39,48 +45,134 @@ describe('mergeRoadWays', () => {
 
   it('keeps separate streets with different names, even sharing a node', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }]),
-      road(2, 'Side', [{ x: 10, z: 0 }, { x: 10, z: 10 }]),
+      road(1, 'Main', [
+        { x: 0, z: 0 },
+        { x: 10, z: 0 },
+      ]),
+      road(2, 'Side', [
+        { x: 10, z: 0 },
+        { x: 10, z: 10 },
+      ]),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('does not merge across a class change', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }], { type: 'residential' }),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }], { type: 'tertiary' }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { type: 'residential' },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 20, z: 0 },
+        ],
+        { type: 'tertiary' },
+      ),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('does not merge a one-way continuation against a two-way', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }], { oneway: 1 }),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }], { oneway: 0 }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 20, z: 0 },
+        ],
+        { oneway: 0 },
+      ),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('does not merge one-way fragments that meet head-to-head', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }], { oneway: 1 }),
-      road(2, 'Main', [{ x: 20, z: 0 }, { x: 10, z: 0 }], { oneway: 1 }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 20, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('does not merge one-way fragments that start tail-to-tail', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }], { oneway: 1 }),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 0, z: 0 }], { oneway: 1 }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 20, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 0, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('chains one-way fragments in their direction of travel regardless of order', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }], { oneway: 1 }),
-      road(2, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }], { oneway: 1 }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 20, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { oneway: 1 },
+      ),
     ]);
     expect(merged).toHaveLength(1);
     expect(merged[0].points).toEqual([
@@ -93,8 +185,24 @@ describe('mergeRoadWays', () => {
 
   it('keeps a one-way -1 merge travelling in the traffic direction', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 10, z: 0 }, { x: 0, z: 0 }], { oneway: -1 }),
-      road(2, 'Main', [{ x: 20, z: 0 }, { x: 10, z: 0 }], { oneway: -1 }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 0, z: 0 },
+        ],
+        { oneway: -1 },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 20, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { oneway: -1 },
+      ),
     ]);
     expect(merged).toHaveLength(1);
     expect(merged[0].points).toEqual([
@@ -107,16 +215,38 @@ describe('mergeRoadWays', () => {
 
   it('does not merge fragments with different access', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }], { access: 'yes' }),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }], { access: 'private' }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { access: 'yes' },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 20, z: 0 },
+        ],
+        { access: 'private' },
+      ),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('reverses a fragment that points into the shared node', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 10, z: 0 }, { x: 0, z: 0 }]),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }]),
+      road(1, 'Main', [
+        { x: 10, z: 0 },
+        { x: 0, z: 0 },
+      ]),
+      road(2, 'Main', [
+        { x: 10, z: 0 },
+        { x: 20, z: 0 },
+      ]),
     ]);
     expect(merged).toHaveLength(1);
     expect(merged[0].points[0]).toEqual({ x: 0, z: 0 });
@@ -125,26 +255,50 @@ describe('mergeRoadWays', () => {
 
   it('stops at a junction where three roads meet', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 0, z: 10 }]),
-      road(2, 'Main', [{ x: 0, z: 10 }, { x: 10, z: 10 }]),
-      road(3, 'Main', [{ x: 0, z: 10 }, { x: 0, z: 20 }]),
+      road(1, 'Main', [
+        { x: 0, z: 0 },
+        { x: 0, z: 10 },
+      ]),
+      road(2, 'Main', [
+        { x: 0, z: 10 },
+        { x: 10, z: 10 },
+      ]),
+      road(3, 'Main', [
+        { x: 0, z: 10 },
+        { x: 0, z: 20 },
+      ]),
     ]);
     expect(merged).toHaveLength(3);
   });
 
   it('stops at a dead end', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }]),
-      road(2, 'Side', [{ x: 10, z: 0 }, { x: 20, z: 0 }]),
+      road(1, 'Main', [
+        { x: 0, z: 0 },
+        { x: 10, z: 0 },
+      ]),
+      road(2, 'Side', [
+        { x: 10, z: 0 },
+        { x: 20, z: 0 },
+      ]),
     ]);
     expect(merged).toHaveLength(2);
   });
 
   it('chains through several fragments', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }]),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }]),
-      road(3, 'Main', [{ x: 20, z: 0 }, { x: 30, z: 0 }]),
+      road(1, 'Main', [
+        { x: 0, z: 0 },
+        { x: 10, z: 0 },
+      ]),
+      road(2, 'Main', [
+        { x: 10, z: 0 },
+        { x: 20, z: 0 },
+      ]),
+      road(3, 'Main', [
+        { x: 20, z: 0 },
+        { x: 30, z: 0 },
+      ]),
     ]);
     expect(merged).toHaveLength(1);
     expect(merged[0].points).toHaveLength(4);
@@ -164,8 +318,24 @@ describe('mergeRoadWays', () => {
 
   it('takes lanes and width from the longer fragment', () => {
     const merged = mergeRoadWays([
-      road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }], { lanes: 1, width: 6 }),
-      road(2, 'Main', [{ x: 10, z: 0 }, { x: 210, z: 0 }], { lanes: 3, width: 10 }),
+      road(
+        1,
+        'Main',
+        [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ],
+        { lanes: 1, width: 6 },
+      ),
+      road(
+        2,
+        'Main',
+        [
+          { x: 10, z: 0 },
+          { x: 210, z: 0 },
+        ],
+        { lanes: 3, width: 10 },
+      ),
     ]);
     expect(merged).toHaveLength(1);
     expect(merged[0].lanes).toBe(3);
@@ -189,8 +359,14 @@ describe('mergeMapData', () => {
         totalRoads: 2,
       },
       roads: [
-        road(1, 'Main', [{ x: 0, z: 0 }, { x: 10, z: 0 }]),
-        road(2, 'Main', [{ x: 10, z: 0 }, { x: 20, z: 0 }]),
+        road(1, 'Main', [
+          { x: 0, z: 0 },
+          { x: 10, z: 0 },
+        ]),
+        road(2, 'Main', [
+          { x: 10, z: 0 },
+          { x: 20, z: 0 },
+        ]),
       ],
     };
     const merged = mergeMapData(data);

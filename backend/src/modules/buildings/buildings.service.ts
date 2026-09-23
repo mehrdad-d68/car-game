@@ -48,7 +48,9 @@ export class BuildingsService {
   findPlacements(): BuildingPlacement[] {
     if (this.placements === null) {
       const path = join(__dirname, 'data', 'building-placements.json');
-      this.placements = JSON.parse(readFileSync(path, 'utf8')) as BuildingPlacement[];
+      this.placements = JSON.parse(
+        readFileSync(path, 'utf8'),
+      ) as BuildingPlacement[];
     }
     return this.placements;
   }

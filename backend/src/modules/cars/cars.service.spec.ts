@@ -6,9 +6,9 @@ describe('CarsService', () => {
   it('returns the seed catalog', () => {
     const cars = service.findAll();
     expect(cars.length).toBeGreaterThanOrEqual(2);
-    expect(cars.every((c) => c.id && c.name && c.handling && c.appearance)).toBe(
-      true,
-    );
+    expect(
+      cars.every((c) => c.id && c.name && c.handling && c.appearance),
+    ).toBe(true);
   });
 
   it('returns a car by id', () => {

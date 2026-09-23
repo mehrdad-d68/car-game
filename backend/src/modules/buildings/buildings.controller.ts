@@ -1,7 +1,18 @@
-import { Controller, Get, NotFoundException, Param, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createReadStream } from 'node:fs';
-import type { BuildingAssignments, BuildingPlacement, BuildingSpec } from './building-spec';
+import type {
+  BuildingAssignments,
+  BuildingPlacement,
+  BuildingSpec,
+} from './building-spec';
 import { BuildingsService } from './buildings.service';
 
 const MODEL_CONTENT_TYPE = 'model/gltf-binary';
@@ -35,7 +46,11 @@ export class BuildingsController {
   }
 
   @Get(':id/model')
-  getModel(@Param('id') id: string, @Req() req: Request, @Res() res: Response): void {
+  getModel(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): void {
     if (!this.buildingsService.findOne(id)) {
       throw new NotFoundException(`Building "${id}" not found`);
     }

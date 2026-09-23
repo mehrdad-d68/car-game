@@ -1,12 +1,14 @@
 import { HttpClient } from '@angular/common/http';
 import { DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { environment } from '../../../../environments/environment';
 import { BuildingSource } from '../engine/ports';
 import { BuildingAssignments, BuildingPlacement, BuildingSpec } from '../engine/sim/building-spec';
+import { withModelApiUrl } from './api-url';
 
-const BUILDINGS_URL = '/api/buildings';
-const PLACEMENTS_URL = '/api/buildings/placements';
-const ASSIGNMENTS_URL = '/api/buildings/assignments';
+const BUILDINGS_URL = `${environment.apiUrl}/api/buildings`;
+const PLACEMENTS_URL = `${environment.apiUrl}/api/buildings/placements`;
+const ASSIGNMENTS_URL = `${environment.apiUrl}/api/buildings/assignments`;
 
 export class BackendBuildingSource implements BuildingSource {
   constructor(
@@ -20,7 +22,7 @@ export class BackendBuildingSource implements BuildingSource {
         .get<BuildingSpec[]>(BUILDINGS_URL)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: (buildings) => resolve(buildings),
+          next: (buildings) => resolve(buildings.map((building) => withModelApiUrl(building))),
           error: (err) => reject(err),
           complete: () => reject(new Error('buildings request disposed before it answered')),
         });

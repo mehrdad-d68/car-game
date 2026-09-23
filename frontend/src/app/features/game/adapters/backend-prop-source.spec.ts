@@ -8,6 +8,7 @@ import {
 } from '@angular/common/http/testing';
 import { DestroyRef } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
+import { environment } from '../../../../environments/environment';
 import { BackendPropSource } from './backend-prop-source';
 import { PropSpec } from '../engine/sim/prop-spec';
 
@@ -65,5 +66,22 @@ describe('BackendPropSource', () => {
     controller.expectOne('/api/props').error(new ProgressEvent('error'));
 
     await expect(promise).rejects.toBeTruthy();
+  });
+
+  it('prefixes model urls with the configured api url', async () => {
+    const { controller, create } = setup();
+    const source = create();
+
+    const promise = source.loadProps();
+    const req = controller.expectOne('/api/props');
+    req.flush([
+      {
+        ...A_PROP,
+        model: { url: '/api/props/gasStation/model', targetLength: 4, yawOffset: 0 },
+      },
+    ]);
+
+    const props = await promise;
+    expect(props[0].model?.url).toBe(`${environment.apiUrl}/api/props/gasStation/model`);
   });
 });

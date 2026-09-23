@@ -1,4 +1,11 @@
-import { Controller, Get, NotFoundException, Param, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createReadStream } from 'node:fs';
 import type { CarSpec } from './car-spec';
@@ -25,7 +32,11 @@ export class CarsController {
   }
 
   @Get(':id/model')
-  getModel(@Param('id') id: string, @Req() req: Request, @Res() res: Response): void {
+  getModel(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): void {
     if (!this.carsService.findOne(id)) {
       throw new NotFoundException(`Car "${id}" not found`);
     }

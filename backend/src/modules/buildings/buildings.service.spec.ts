@@ -9,7 +9,13 @@ describe('BuildingsService', () => {
     expect(buildings.length).toBeGreaterThanOrEqual(3);
     expect(
       buildings.every(
-        (b) => b.id && b.name && b.category && b.footprint && b.height > 0 && b.parts.length >= 3,
+        (b) =>
+          b.id &&
+          b.name &&
+          b.category &&
+          b.footprint &&
+          b.height > 0 &&
+          b.parts.length >= 3,
       ),
     ).toBe(true);
   });
@@ -98,7 +104,10 @@ describe('mergeAssignments', () => {
   });
 
   it('lets a null override take a building back to the generated path', () => {
-    const merged = mergeAssignments({ '7': { spec: 'house' } }, { '7': { spec: null } });
+    const merged = mergeAssignments(
+      { '7': { spec: 'house' } },
+      { '7': { spec: null } },
+    );
     expect(merged['7'].spec).toBeNull();
   });
 

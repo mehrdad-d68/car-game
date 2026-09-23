@@ -1,4 +1,11 @@
-import { Controller, Get, NotFoundException, Param, Req, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  NotFoundException,
+  Param,
+  Req,
+  Res,
+} from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { createReadStream } from 'node:fs';
 import type { PropSpec } from './prop-spec';
@@ -25,7 +32,11 @@ export class PropsController {
   }
 
   @Get(':kind/model')
-  getModel(@Param('kind') kind: string, @Req() req: Request, @Res() res: Response): void {
+  getModel(
+    @Param('kind') kind: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): void {
     if (!this.propsService.findOne(kind)) {
       throw new NotFoundException(`Prop "${kind}" not found`);
     }

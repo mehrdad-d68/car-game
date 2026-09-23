@@ -17,10 +17,7 @@ const MAP_DATA_FILE = join(
 
 @Module({
   controllers: [MapController],
-  providers: [
-    MapService,
-    { provide: MAP_DATA_PATH, useValue: MAP_DATA_FILE },
-  ],
+  providers: [MapService, { provide: MAP_DATA_PATH, useValue: MAP_DATA_FILE }],
   exports: [MapService],
 })
 export class MapModule {}
