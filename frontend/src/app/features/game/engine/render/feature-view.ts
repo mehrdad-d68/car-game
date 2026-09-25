@@ -1,9 +1,11 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { MapItemKind } from '../sim/osm-types';
 import { PropPart, PropSpec, PropVariant } from '../sim/prop-spec';
 import { PolylineRoad, TrackData } from '../sim/track';
 import { createToonRamp } from './building-textures';
 import { ROAD_HEIGHT, SURFACE_OFFSET } from './constants';
+import { createPropTextures, PropTextures } from './prop-textures';
 import { PartInstance, PropPool } from './prop-pool';
 
 const MARKER_CELL = 600;
@@ -16,6 +18,15 @@ const LIGHT_LOCAL_RADIUS = 45;
 const LIGHT_SETBACKS = [4, 6, 8, 10, 12];
 const LIGHT_KERB_CLEARANCE = 0.5;
 const OVERHEAD_SETBACK = 6;
+
+const SIGNAL_COLOURS = ['red', 'amber', 'green'] as const;
+type SignalColour = (typeof SIGNAL_COLOURS)[number];
+
+function signalColour(x: number, z: number): SignalColour {
+  const seed =
+    Math.round(Math.abs(x) * 12.9898) + Math.round(Math.abs(z) * 78.233);
+  return SIGNAL_COLOURS[Math.abs(seed) % SIGNAL_COLOURS.length];
+}
 
 const BUS_STOP_CENTER_TOLERANCE = 1;
 const BUS_STOP_SIDE_MARGIN = 1.5;
@@ -376,8 +387,7 @@ interface RawAtom {
   placementIndex: number;
   key: string;
   part: PropPart;
-  markerMatrix: THREE.Matrix4;
-  localMatrix: THREE.Matrix4;
+  matrix: THREE.Matrix4;
 }
 
 interface PoolEntry {
@@ -396,8 +406,86 @@ interface MarkerRecord {
   z: number;
 }
 
-function partKey(part: PropPart): string {
-  return `${part.name}|${part.size.join(',')}|${part.color}|${part.emissive ?? ''}|${part.renderOrder ?? ''}|${part.castShadow ?? ''}`;
+export function partKey(part: PropPart): string {
+  const repeat = part.repeat
+    ? `${part.repeat.axis}|${part.repeat.spacing}|${part.repeat.max}`
+    : '';
+  return `${part.name}|${part.size.join(',')}|${part.color}|${part.emissive ?? ''}|${part.renderOrder ?? ''}|${part.castShadow ?? ''}|${part.shape ?? 'box'}|${part.material ?? ''}|${repeat}|${part.scaleWithFootprint ?? 'yes'}`;
+}
+
+export const ROUNDED_BOX_SEGMENTS = 2;
+export const ROUNDED_BOX_RADIUS_RATIO = 0.22;
+
+export function geometryFor(part: PropPart): THREE.BufferGeometry {
+  switch (part.shape) {
+    case 'roundedBox':
+      return new RoundedBoxGeometry(
+        part.size[0],
+        part.size[1],
+        part.size[2],
+        ROUNDED_BOX_SEGMENTS,
+        Math.min(...part.size) * ROUNDED_BOX_RADIUS_RATIO,
+      );
+    case 'cylinderZ': {
+      const cylinder = new THREE.CylinderGeometry(
+        part.size[0] / 2,
+        part.size[0] / 2,
+        part.size[2],
+        24,
+      );
+      cylinder.rotateX(Math.PI / 2);
+      return cylinder;
+    }
+    case 'cylinderY':
+      return new THREE.CylinderGeometry(
+        part.size[0] / 2,
+        part.size[0] / 2,
+        part.size[1],
+        24,
+      );
+    case 'sphere':
+      return new THREE.SphereGeometry(part.size[0] / 2, 24, 16);
+    case 'visor': {
+      const radius = part.size[0] / 2;
+      const geometry = new THREE.CylinderGeometry(
+        radius,
+        radius,
+        part.size[2],
+        24,
+        1,
+        true,
+        Math.PI / 2,
+        Math.PI,
+      );
+      geometry.rotateX(Math.PI / 2);
+      return geometry;
+    }
+    default:
+      return new THREE.BoxGeometry(
+        part.size[0],
+        part.size[1],
+        part.size[2],
+      );
+  }
+}
+
+function repeatOffsets(
+  repeat: { axis: 'x' | 'z'; spacing: number; max: number },
+  footprint: { width: number; depth: number },
+  scaleFactor: number,
+): number[] {
+  const dimension = repeat.axis === 'x' ? footprint.width : footprint.depth;
+  const span = dimension * scaleFactor;
+  const count = Math.max(
+    1,
+    Math.min(repeat.max, Math.floor(span / repeat.spacing) + 1),
+  );
+  const offsets: number[] = [];
+  const start = -((count - 1) / 2) * repeat.spacing;
+  for (let i = 0; i < count; i++) {
+    offsets.push(start + i * repeat.spacing);
+  }
+  return offsets;
 }
 
 export function footprintScale(
@@ -424,13 +512,10 @@ function composeMarkerMatrix(
   y: number,
   z: number,
   yaw: number,
-  scaleX: number,
-  scaleZ: number,
 ): THREE.Matrix4 {
   return new THREE.Matrix4()
     .makeTranslation(x, y, z)
-    .multiply(new THREE.Matrix4().makeRotationY(yaw))
-    .multiply(new THREE.Matrix4().makeScale(scaleX, 1, scaleZ));
+    .multiply(new THREE.Matrix4().makeRotationY(yaw));
 }
 
 function cellKeyAt(cx: number, cz: number): number {
@@ -467,6 +552,7 @@ export class FeatureView {
     private readonly track: TrackData,
     props: PropSpec[],
     models: ReadonlyMap<MapItemKind, THREE.Group> = new Map(),
+    private readonly propTextures: PropTextures = createPropTextures(() => null),
   ) {
     this.build(props, models);
   }
@@ -505,12 +591,20 @@ export class FeatureView {
 
     for (const [key, atoms] of raw) {
       const first = atoms[0].part;
+      const texture = first.material ? this.propTextures[first.material] : undefined;
       const pool = new PropPool(
-        new THREE.BoxGeometry(first.size[0], first.size[1], first.size[2]),
+        geometryFor(first),
         new THREE.MeshToonMaterial({
           color: first.color,
           gradientMap: this.toonRamp,
+          ...(first.shape === 'visor' ? { side: THREE.DoubleSide } : {}),
           ...(first.emissive !== undefined ? { emissive: first.emissive } : {}),
+          ...(texture
+            ? {
+                map: texture,
+                ...(first.emissive !== undefined ? { emissiveMap: texture } : {}),
+              }
+            : {}),
         }),
         atoms.length,
       );
@@ -526,7 +620,7 @@ export class FeatureView {
 
       const entries = atoms.map((atom) => ({
         placementIndex: atom.placementIndex,
-        matrix: atom.markerMatrix.clone().multiply(atom.localMatrix),
+        matrix: atom.matrix,
       }));
 
       const built: BuiltPool = {
@@ -568,21 +662,45 @@ export class FeatureView {
     raw: Map<string, RawAtom[]>,
     placementIndex: number,
     markerMatrix: THREE.Matrix4,
+    footprint: { width: number; depth: number },
+    scaleX: number,
+    scaleZ: number,
     part: PropPart,
     offset: [number, number, number] = [0, 0, 0],
   ): void {
     const key = partKey(part);
-    const localMatrix = new THREE.Matrix4().makeTranslation(
-      part.position[0] + offset[0],
-      part.position[1] + offset[1],
-      part.position[2] + offset[2],
-    );
+    const sizeScaleX = part.scaleWithFootprint === false ? 1 : scaleX;
+    const sizeScaleZ = part.scaleWithFootprint === false ? 1 : scaleZ;
+    const baseX = (part.position[0] + offset[0]) * scaleX;
+    const baseY = part.position[1] + offset[1];
+    const baseZ = (part.position[2] + offset[2]) * scaleZ;
+    const repeat = part.repeat
+      ? repeatOffsets(
+          part.repeat,
+          footprint,
+          part.repeat.axis === 'x' ? scaleX : scaleZ,
+        )
+      : [0];
     let bucket = raw.get(key);
     if (!bucket) {
       bucket = [];
       raw.set(key, bucket);
     }
-    bucket.push({ placementIndex, key, part, markerMatrix, localMatrix });
+    for (const delta of repeat) {
+      const partMatrix = new THREE.Matrix4()
+        .makeTranslation(
+          baseX + (part.repeat?.axis === 'x' ? delta : 0),
+          baseY,
+          baseZ + (part.repeat?.axis === 'z' ? delta : 0),
+        )
+        .multiply(new THREE.Matrix4().makeScale(sizeScaleX, 1, sizeScaleZ));
+      bucket.push({
+        placementIndex,
+        key,
+        part,
+        matrix: markerMatrix.clone().multiply(partMatrix),
+      });
+    }
   }
 
   private emitVariant(
@@ -590,9 +708,13 @@ export class FeatureView {
     placementIndex: number,
     markerMatrix: THREE.Matrix4,
     variant: PropVariant,
+    footprint: { width: number; depth: number },
+    scaleX: number,
+    scaleZ: number,
+    offset: [number, number, number] = [0, 0, 0],
   ): void {
     for (const part of variant.parts) {
-      this.emitPart(raw, placementIndex, markerMatrix, part);
+      this.emitPart(raw, placementIndex, markerMatrix, footprint, scaleX, scaleZ, part, offset);
     }
   }
 
@@ -625,9 +747,10 @@ export class FeatureView {
     const useModel = models.has('trafficLight');
     const plans = planTrafficLightApproaches(x, z, this.track.roads);
     for (const plan of plans.slice(0, MAX_APPROACHES)) {
+      const variantId = `${plan.mount}-${signalColour(plan.x, plan.z)}`;
       const placement: Placement = {
         kind: 'trafficLight',
-        variant: plan.mount,
+        variant: variantId,
         x: plan.x,
         y: 0,
         z: plan.z,
@@ -640,10 +763,10 @@ export class FeatureView {
         this.placeModel(models, 'trafficLight', placement);
         continue;
       }
-      const variant = variantFor(spec, plan.mount);
+      const variant = variantFor(spec, variantId);
       if (!variant) continue;
-      const marker = composeMarkerMatrix(plan.x, 0, plan.z, plan.faceYaw, 1, 1);
-      this.emitVariant(raw, index, marker, variant);
+      const marker = composeMarkerMatrix(plan.x, 0, plan.z, plan.faceYaw);
+      this.emitVariant(raw, index, marker, variant, { width: 1, depth: 1 }, 1, 1);
     }
   }
 
@@ -684,14 +807,21 @@ export class FeatureView {
       ROAD_HEIGHT + stripeHeight / 2,
       z,
       alignment.rotation,
-      1,
-      1,
     );
     const count = crossingStripeCount(alignment.width);
     const half = (count - 1) / 2;
     const part = variant.parts[0];
     for (let i = 0; i < count; i++) {
-      this.emitPart(raw, index, marker, part, [0, 0, (i - half) * STRIPE_PITCH]);
+      this.emitPart(
+        raw,
+        index,
+        marker,
+        { width: 1, depth: 1 },
+        1,
+        1,
+        part,
+        [0, 0, (i - half) * STRIPE_PITCH],
+      );
     }
   }
 
@@ -707,12 +837,13 @@ export class FeatureView {
     const spec = specFor(props, 'busStop');
     if (!spec) return;
     const placement = placeBusStop(x, z, this.track.roads);
-    const base = spec.footprint ?? { width: 1.7, depth: 1.0 };
-    const scaleX = footprintScale(width, base.width);
-    const scaleZ = footprintScale(depth, base.depth);
+    const base = spec.footprint ?? { width: 8, depth: 6 };
+    const interchange = width !== undefined && width >= 8;
+    const scaleX = interchange ? footprintScale(width, base.width) : 1;
+    const scaleZ = interchange ? Math.min(footprintScale(depth, base.depth), 3) : 1;
     const placed: Placement = {
       kind: 'busStop',
-      variant: 'default',
+      variant: interchange ? 'interchange' : 'shelter',
       x: placement.x,
       y: 0,
       z: placement.z,
@@ -725,10 +856,10 @@ export class FeatureView {
       this.placeModel(models, 'busStop', placed);
       return;
     }
-    const variant = variantFor(spec, 'default');
+    const variant = variantFor(spec, placed.variant);
     if (!variant) return;
-    const marker = composeMarkerMatrix(placement.x, 0, placement.z, placement.faceYaw, scaleX, scaleZ);
-    this.emitVariant(raw, index, marker, variant);
+    const marker = composeMarkerMatrix(placement.x, 0, placement.z, placement.faceYaw);
+    this.emitVariant(raw, index, marker, variant, base, scaleX, scaleZ);
   }
 
   private handleStation(
@@ -763,8 +894,8 @@ export class FeatureView {
     }
     const variant = variantFor(spec, 'default');
     if (!variant) return;
-    const marker = composeMarkerMatrix(x, 0, z, 0, scaleX, scaleZ);
-    this.emitVariant(raw, index, marker, variant);
+    const marker = composeMarkerMatrix(x, 0, z, 0);
+    this.emitVariant(raw, index, marker, variant, base, scaleX, scaleZ);
   }
 
   update(carX: number, carZ: number): void {
@@ -838,5 +969,8 @@ export class FeatureView {
     this.windowCount = 0;
     this.modelRecords.length = 0;
     this.toonRamp.dispose();
+    this.propTextures.lens.dispose();
+    this.propTextures.housing.dispose();
+    this.propTextures.sign.dispose();
   }
 }

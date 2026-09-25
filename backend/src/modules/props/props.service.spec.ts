@@ -23,11 +23,15 @@ describe('PropsService', () => {
     }
   });
 
-  it('carries pole and overhead variants for traffic lights', () => {
+  it('carries a signal variant for every mount and colour', () => {
     const traffic = service.findOne('trafficLight')!;
     expect(traffic.variants.map((v) => v.id).sort()).toEqual([
-      'overhead',
-      'pole',
+      'overhead-amber',
+      'overhead-green',
+      'overhead-red',
+      'pole-amber',
+      'pole-green',
+      'pole-red',
     ]);
   });
 
@@ -42,8 +46,8 @@ describe('PropsService', () => {
 
   it('exposes a footprint for scaled kinds', () => {
     expect(service.findOne('busStop')!.footprint).toEqual({
-      width: 1.7,
-      depth: 1.0,
+      width: 8,
+      depth: 6,
     });
     expect(service.findOne('gasStation')!.footprint).toEqual({
       width: 8,
