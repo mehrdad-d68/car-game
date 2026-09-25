@@ -1,5 +1,16 @@
 import type { MapItemKind } from '../map/osm-types';
 
+export type PropShape =
+  'box' | 'roundedBox' | 'cylinderZ' | 'cylinderY' | 'sphere' | 'visor';
+
+export type PropMaterial = 'lens' | 'housing' | 'sign';
+
+export interface PropRepeat {
+  axis: 'x' | 'z';
+  spacing: number;
+  max: number;
+}
+
 export interface PropPart {
   name: string;
   size: [number, number, number];
@@ -8,6 +19,10 @@ export interface PropPart {
   emissive?: number;
   renderOrder?: number;
   castShadow?: boolean;
+  shape?: PropShape;
+  material?: PropMaterial;
+  repeat?: PropRepeat;
+  scaleWithFootprint?: boolean;
 }
 
 export interface PropVariant {

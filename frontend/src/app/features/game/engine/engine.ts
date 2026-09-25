@@ -4,6 +4,7 @@ import { CarSource, BuildingSource, InputSource, PropSource, TrackSource } from 
 import { BuildingView, BuildingCatalogInput } from './render/building-view';
 import { CameraRig } from './render/camera-rig';
 import { createBuildingTextures } from './render/building-textures';
+import { createPropTextures } from './render/prop-textures';
 import { CarView } from './render/car-view';
 import { DebugPins, Pin } from './render/debug-pins';
 import type { PartKind } from './render/detail-kit';
@@ -139,7 +140,17 @@ export class Engine {
     this.carView = new CarView(carSpec.appearance, modelGroup);
     this.trackView = new TrackView(track);
     this.trackView.buildLabels();
-    this.featureView = new FeatureView(track, props, propModels);
+    this.featureView = new FeatureView(
+      track,
+      props,
+      propModels,
+      createPropTextures((width, height) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        return canvas.getContext('2d');
+      }),
+    );
     const catalog: BuildingCatalogInput = {
       specs: buildings,
       placements: buildingPlacements,

@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 import { MapItemKind, OSMMapData } from '../sim/osm-types';
+import { PropPart } from '../sim/prop-spec';
 import { createTrack } from '../sim/track';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import {
   crossingStripeCount,
   crossingStripeRotation,
   FeatureView,
+  geometryFor,
+  ROUNDED_BOX_RADIUS_RATIO,
+  partKey,
   placeBusStop,
   planTrafficLightApproaches,
 } from './feature-view';
@@ -52,6 +56,7 @@ const SAMPLE_DATA: OSMMapData = {
   items: [
     { kind: 'trafficLight', id: 1, x: 0, z: 0 },
     { kind: 'trafficLight', id: 2, x: 10, z: 0 },
+    { kind: 'trafficLight', id: 3, x: 12, z: 0 },
     { kind: 'pedestrianCrossing', id: 10, x: 0, z: 0 },
     { kind: 'busStop', id: 20, x: 0, z: 0, name: 'Central', type: 'platform' },
     { kind: 'busStop', id: 21, x: 20000, z: 20000, name: 'Far', type: 'platform' },
@@ -330,8 +335,8 @@ describe('FeatureView', () => {
   });
 
   it('exposes one placement per traffic light approach', () => {
-    expect(view.placements.filter((p) => p.kind === 'trafficLight')).toHaveLength(2);
-    expect(view.placements.every((p) => p.kind !== 'trafficLight' || p.variant === 'pole')).toBe(true);
+    expect(view.placements.filter((p) => p.kind === 'trafficLight')).toHaveLength(3);
+    expect(view.placements.every((p) => p.kind !== 'trafficLight' || p.variant.startsWith('pole-'))).toBe(true);
   });
 
   it('exposes one placement per crossing with the road-aligned yaw', () => {
@@ -343,7 +348,7 @@ describe('FeatureView', () => {
 
   it('builds one pool per distinct part type, not per marker', () => {
     const totalCapacity = view.pools.reduce((sum, pool) => sum + pool.capacity, 0);
-    expect(view.pools.length).toBe(18);
+    expect(view.pools.length).toBe(29);
     expect(view.pools.length).toBeLessThan(totalCapacity);
     for (const pool of view.pools) {
       expect(pool.mesh).toBeInstanceOf(THREE.InstancedMesh);
@@ -372,13 +377,107 @@ describe('FeatureView', () => {
     expect((signalPole.mesh.material as THREE.Material).polygonOffset).toBe(false);
   });
 
-  it('shares one lamp pool per signal colour', () => {
-    const lamps = view.pools.filter((pool) => pool.name.startsWith('lamp-'));
-    expect(lamps.map((pool) => pool.name).sort()).toEqual([
-      'lamp-amber',
-      'lamp-green',
-      'lamp-red',
+  it('lights exactly one lens per signal and tints the off lamps', () => {
+    const lens = view.pools.filter((pool) => pool.name === 'lens');
+    expect(lens).toHaveLength(6);
+    const lit = lens.filter((pool) => {
+      const material = pool.mesh.material as THREE.MeshToonMaterial;
+      return material.emissive && material.emissive.getHex() !== 0;
+    });
+    expect(lit.map((pool) => (pool.mesh.material as THREE.MeshToonMaterial).emissive.getHexString()).sort()).toEqual([
+      '43a047',
+      'e53935',
+      'f9a825',
     ]);
+    const litCapacity = lit.reduce((sum, pool) => sum + pool.capacity, 0);
+    expect(litCapacity).toBe(3);
+    const off = lens.filter((pool) => !((pool.mesh.material as THREE.MeshToonMaterial).emissive.getHexString() !== '000000'));
+    expect(off).toHaveLength(3);
+    for (const pool of off) {
+      expect(pool.capacity).toBe(2);
+      expect((pool.mesh.material as THREE.MeshToonMaterial).color.getHex()).toBeGreaterThan(0x303030);
+    }
+    const offColours = off.map((pool) => (pool.mesh.material as THREE.MeshToonMaterial).color.getHexString());
+    expect(new Set(offColours).size).toBe(3);
+    expect(offColours.includes('000000')).toBe(false);
+  });
+
+  it('shrinks unlit lens geometry to cylinders while lit lenses glow', () => {
+    const lens = view.pools.filter((pool) => pool.name === 'lens');
+    for (const pool of lens) {
+      expect(pool.mesh.geometry).toBeInstanceOf(THREE.CylinderGeometry);
+      expect(
+        (pool.mesh.geometry as THREE.CylinderGeometry).parameters.radiusTop,
+      ).toBeCloseTo(0.17, 6);
+      const material = pool.mesh.material as THREE.MeshToonMaterial;
+      expect(material.map).toBeDefined();
+      const lit = material.emissive && material.emissive.getHex() !== 0;
+      expect(material.emissiveMap).toBe(lit ? material.map : null);
+    }
+    const litTextures = lens
+      .filter(
+        (pool) =>
+          (pool.mesh.material as THREE.MeshToonMaterial).emissiveMap !== null,
+      )
+      .map((pool) => (pool.mesh.material as THREE.MeshToonMaterial).emissiveMap);
+    const reference = litTextures[0];
+    expect(litTextures.every((texture) => texture === reference)).toBe(true);
+  });
+
+  it('draws a curved visor hood attached over every lens', () => {
+    const visor = view.pools.find((pool) => pool.name === 'visor')!;
+    expect(visor.kind).toBe('trafficLight');
+    expect(visor.capacity).toBe(9);
+    expect(visor.mesh.geometry).toBeInstanceOf(THREE.CylinderGeometry);
+
+    const declared = PROP_SPECS.find((spec) => spec.kind === 'trafficLight')!
+      .variants[0].parts.find((part) => part.name === 'visor')!;
+    const params = (visor.mesh.geometry as THREE.CylinderGeometry).parameters;
+    expect(params.radiusTop).toBeCloseTo(declared.size[0] / 2, 6);
+    expect(params.height).toBeCloseTo(declared.size[2], 6);
+  });
+
+  it('opens the visor hood downwards so it shades the lens instead of capping it', () => {
+    const visor = view.pools.find((pool) => pool.name === 'visor')!;
+    const params = (visor.mesh.geometry as THREE.CylinderGeometry).parameters;
+    expect(params.openEnded).toBe(true);
+    expect(params.thetaLength).toBeCloseTo(Math.PI, 6);
+    expect(params.thetaStart).toBeCloseTo(Math.PI / 2, 6);
+
+    visor.mesh.geometry.computeBoundingBox();
+    const box = visor.mesh.geometry.boundingBox!;
+    const radius = params.radiusTop;
+    expect(box.min.y).toBeCloseTo(0, 6);
+    expect(box.max.y).toBeCloseTo(radius, 6);
+    expect(box.min.x).toBeCloseTo(-radius, 6);
+    expect(box.max.x).toBeCloseTo(radius, 6);
+  });
+
+  it('seats every visor hood into the signal head with no gap', () => {
+    const spec = PROP_SPECS.find((s) => s.kind === 'trafficLight')!;
+    for (const variant of spec.variants) {
+      const head = variant.parts.find((part) => part.name === 'head')!;
+      const headFrontZ = head.position[2] + head.size[2] / 2;
+      for (const visor of variant.parts.filter((part) => part.name === 'visor')) {
+        expect(visor.position[2] - visor.size[2] / 2).toBeLessThanOrEqual(headFrontZ);
+      }
+    }
+  });
+
+  it('keeps each visor hood clear of the lens above it', () => {
+    const spec = PROP_SPECS.find((s) => s.kind === 'trafficLight')!;
+    for (const variant of spec.variants) {
+      const lenses = variant.parts.filter((part) => part.name === 'lens');
+      const visors = variant.parts.filter((part) => part.name === 'visor');
+      const gaps = lenses
+        .map((lens) => lens.position[1])
+        .sort((a, b) => a - b)
+        .flatMap((y, i, all) => (i === 0 ? [] : [all[i] - all[i - 1]]));
+      const lensRadius = lenses[0].size[0] / 2;
+      for (const visor of visors) {
+        expect(visor.size[0] / 2).toBeLessThan(Math.min(...gaps) - lensRadius);
+      }
+    }
   });
 
   it('builds one placement per public transport stop', () => {
@@ -388,7 +487,7 @@ describe('FeatureView', () => {
 
   it('places traffic lights beside the road near their input positions', () => {
     const lights = view.placements.filter((p) => p.kind === 'trafficLight');
-    expect(lights).toHaveLength(2);
+    expect(lights).toHaveLength(3);
     for (const light of lights) {
       expect(Math.abs(light.z)).toBeCloseTo(7.5, 2);
     }
@@ -414,8 +513,9 @@ describe('FeatureView', () => {
     expect(hospital.scaleX).toBeCloseTo(60 / 10);
     expect(hospital.scaleZ).toBeCloseTo(30 / 8);
     const stop = sized.placements.find((p) => p.kind === 'busStop')!;
-    expect(stop.scaleX).toBeCloseTo(25 / 1.7);
-    expect(stop.scaleZ).toBeCloseTo(5 / 1.0);
+    expect(stop.variant).toBe('interchange');
+    expect(stop.scaleX).toBeCloseTo(25 / 8);
+    expect(stop.scaleZ).toBeCloseTo(1);
     sized.dispose();
   });
 
@@ -429,6 +529,39 @@ describe('FeatureView', () => {
     expect(gas.scaleX).toBe(1);
     expect(gas.scaleZ).toBe(1);
     viewPlain.dispose();
+  });
+
+  it('chooses the shelter variant when a bus stop has no footprint', () => {
+    const stops = view.placements.filter((p) => p.kind === 'busStop');
+    expect(stops).toHaveLength(2);
+    for (const stop of stops) {
+      expect(stop.variant).toBe('shelter');
+      expect(stop.scaleX).toBe(1);
+      expect(stop.scaleZ).toBe(1);
+    }
+  });
+
+  it('spans interchange posts and benches across the placed footprint', () => {
+    const plaza = createTrack({
+      ...SAMPLE_DATA,
+      items: [
+        { kind: 'busStop', id: 5, x: 0, z: 0, name: 'Plaza', type: 'platform', width: 26.7, depth: 5 },
+      ],
+    });
+    const viewPlaza = new FeatureView(plaza, PROP_SPECS);
+    const stop = viewPlaza.placements.find((p) => p.kind === 'busStop')!;
+    expect(stop.variant).toBe('interchange');
+    viewPlaza.update(0, 0);
+    const posts = viewPlaza.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'post')!;
+    const benches = viewPlaza.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'bench')!;
+    expect(posts.mesh.count).toBe(7);
+    expect(benches.mesh.count).toBe(5);
+    const canopy = viewPlaza.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'canopy')!;
+    expect(canopy.mesh.count).toBe(1);
+    expect((canopy.mesh.geometry as THREE.BoxGeometry).parameters.width).toBeCloseTo(8, 6);
+    const scaleX = canopy.mesh.instanceMatrix.array[0];
+    expect(Math.abs(scaleX)).toBeCloseTo(26.7 / 8, 3);
+    viewPlaza.dispose();
   });
 
   it('starts with every pool empty', () => {
@@ -446,10 +579,10 @@ describe('FeatureView', () => {
   });
 
   it('clears every pool when the car enters an empty region', () => {
-    const busPole = view.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'pole')!;
+    const busPole = view.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'post')!;
 
     view.update(0, 0);
-    expect(busPole.mesh.count).toBe(1);
+    expect(busPole.mesh.count).toBe(2);
 
     view.update(30000, 30000);
     for (const pool of view.pools) {
@@ -458,13 +591,13 @@ describe('FeatureView', () => {
   });
 
   it('reveals placement pools near the car and keeps far ones empty', () => {
-    const busPole = view.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'pole')!;
+    const busPole = view.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'post')!;
 
     view.update(0, 0);
-    expect(busPole.mesh.count).toBe(1);
+    expect(busPole.mesh.count).toBe(2);
 
     view.update(20000, 20000);
-    expect(busPole.mesh.count).toBe(1);
+    expect(busPole.mesh.count).toBe(2);
     expect(view.pools.find((pool) => pool.kind === 'pedestrianCrossing')!.mesh.count).toBe(0);
   });
 
@@ -472,7 +605,7 @@ describe('FeatureView', () => {
     const signalPole = view.pools.find((pool) => pool.kind === 'trafficLight' && pool.name === 'pole')!;
 
     view.update(0, 0);
-    expect(signalPole.mesh.count).toBe(2);
+    expect(signalPole.mesh.count).toBe(3);
 
     view.update(20000, 20000);
     expect(signalPole.mesh.count).toBe(0);
@@ -500,7 +633,7 @@ describe('FeatureView', () => {
   it('keeps building after dispose', () => {
     view.dispose();
     const rebuilt = new FeatureView(createTrack(SAMPLE_DATA), PROP_SPECS);
-    expect(placementsOf(rebuilt, 'trafficLight')).toHaveLength(2);
+    expect(placementsOf(rebuilt, 'trafficLight')).toHaveLength(3);
     rebuilt.dispose();
   });
 });
@@ -581,6 +714,82 @@ describe('Vienna prop placement guard', () => {
     expect(view.pools.length).toBeLessThan(50);
 
     view.dispose();
+  });
+});
+
+describe('Prop part geometry', () => {
+  const part = (overrides: Partial<PropPart>): PropPart =>
+    ({
+      name: 'p',
+      position: [0, 0, 0],
+      size: [2, 1, 3],
+      color: 0xffffff,
+      ...overrides,
+    }) as PropPart;
+
+  it('builds boxes by default', () => {
+    const geometry = geometryFor(part({}));
+    expect(geometry).toBeInstanceOf(THREE.BoxGeometry);
+    expect((geometry as THREE.BoxGeometry).parameters.width).toBeCloseTo(2, 6);
+    expect((geometry as THREE.BoxGeometry).parameters.depth).toBeCloseTo(3, 6);
+  });
+
+  it('builds a rotated cylinder for cylinderZ', () => {
+    const geometry = geometryFor(part({ shape: 'cylinderZ', size: [0.4, 0.4, 0.12] }));
+    expect(geometry).toBeInstanceOf(THREE.CylinderGeometry);
+    expect((geometry as THREE.CylinderGeometry).parameters.radiusTop).toBeCloseTo(0.2, 6);
+    expect((geometry as THREE.CylinderGeometry).parameters.height).toBeCloseTo(0.12, 6);
+  });
+
+  it('builds an upright cylinder for cylinderY and a sphere for sphere', () => {
+    const cylinder = geometryFor(part({ shape: 'cylinderY', size: [1, 2, 1] }));
+    expect((cylinder as THREE.CylinderGeometry).parameters.height).toBeCloseTo(2, 6);
+    const sphere = geometryFor(part({ shape: 'sphere', size: [2, 2, 2] }));
+    expect(sphere).toBeInstanceOf(THREE.SphereGeometry);
+    expect((sphere as THREE.SphereGeometry).parameters.radius).toBeCloseTo(1, 6);
+  });
+
+  it('builds an open half-cylinder hood for visor', () => {
+    const visor = geometryFor(part({ shape: 'visor', size: [0.52, 0.52, 0.4] }));
+    expect(visor).toBeInstanceOf(THREE.CylinderGeometry);
+    const cylinder = visor as THREE.CylinderGeometry;
+    expect(cylinder.parameters.radiusTop).toBeCloseTo(0.26, 6);
+    expect(cylinder.parameters.height).toBeCloseTo(0.4, 6);
+    expect(cylinder.parameters.thetaLength).toBeCloseTo(Math.PI, 6);
+  });
+
+  it('builds a rounded box that occupies the same volume as a plain box', () => {
+    const size: [number, number, number] = [0.9, 1.9, 0.25];
+    const rounded = geometryFor(part({ shape: 'roundedBox', size }));
+    const plain = geometryFor(part({ size }));
+    rounded.computeBoundingBox();
+    plain.computeBoundingBox();
+    expect(rounded.boundingBox!.min).toEqual(plain.boundingBox!.min);
+    expect(rounded.boundingBox!.max).toEqual(plain.boundingBox!.max);
+  });
+
+  it('keeps the rounding radius inside the thinnest side', () => {
+    for (const size of [
+      [0.9, 1.9, 0.25],
+      [4, 0.14, 1.85],
+      [0.09, 0.46, 0.4],
+    ] as [number, number, number][]) {
+      const radius = Math.min(...size) * ROUNDED_BOX_RADIUS_RATIO;
+      expect(radius).toBeLessThan(Math.min(...size) / 2);
+      expect(geometryFor(part({ shape: 'roundedBox', size }))).toBeInstanceOf(
+        THREE.BufferGeometry,
+      );
+    }
+  });
+
+  it('separates pools by shape, material, and repeat', () => {
+    const plain = part({});
+    const material = part({ material: 'housing' });
+    const repeated = part({ repeat: { axis: 'x', spacing: 4, max: 20 } });
+    const unsealed = part({ scaleWithFootprint: false });
+    const keys = new Set([partKey(plain), partKey(material), partKey(repeated), partKey(unsealed)]);
+    expect(keys.size).toBe(4);
+    expect(partKey(plain)).toBe(partKey(part({})));
   });
 });
 
