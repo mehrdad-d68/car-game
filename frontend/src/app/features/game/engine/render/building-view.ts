@@ -139,6 +139,7 @@ export class BuildingView {
   private readonly plan: (building: Building, nearby: Building[]) => PartPlacement[];
 
   private readonly catalog: BuildingCatalogInput | null;
+  private readonly replaced: ReadonlySet<number>;
   private readonly catalogModels = new Map<string, THREE.Group>();
   private readonly catalogSpecs = new Map<string, BuildingSpec>();
   private readonly placementsByTile = new Map<string, BuildingPlacement[]>();
@@ -152,9 +153,11 @@ export class BuildingView {
     textures: BuildingTextures,
     plan: (building: Building, nearby: Building[]) => PartPlacement[] = planParts,
     catalog: BuildingCatalogInput | null = null,
+    replaced: ReadonlySet<number> = new Set(),
   ) {
     this.plan = plan;
     this.textures = textures;
+    this.replaced = replaced;
     this.grid = new BuildingGrid(buildings);
     this.byId.clear();
     for (const building of buildings) {
@@ -275,6 +278,7 @@ export class BuildingView {
     const catalogInstances = new Map<string, CatalogPartInstance[]>();
     const tileModels: THREE.Object3D[] = [];
     for (const building of buildings) {
+      if (this.replaced.has(building.id)) continue;
       const matched = this.matchFor(building);
       if (matched) {
         this.collectCatalog(building, matched, catalogInstances);

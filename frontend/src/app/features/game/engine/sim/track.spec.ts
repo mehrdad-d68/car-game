@@ -1,13 +1,15 @@
-import { OSMMapData } from './osm-types';
+import { OSMBuilding, OSMMapData } from './osm-types';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import {
   createTrack,
   findJunctions,
   JunctionGrid,
   markingPattern,
+  nearestRoadPoint,
   PolylineRoad,
   projectOntoRoad,
   roadClass,
+  snapYawTo,
 } from './track';
 
 const SAMPLE_DATA: OSMMapData = {
@@ -59,6 +61,28 @@ const SAMPLE_DATA: OSMMapData = {
     },
   ],
 };
+
+function rectangle(
+  id: number,
+  x: number,
+  z: number,
+  width: number,
+  depth: number,
+): OSMBuilding {
+  return {
+    id,
+    type: 'public',
+    name: 'Gebaeude',
+    levels: 4,
+    points: [
+      { x, z },
+      { x: x + width, z },
+      { x: x + width, z: z + depth },
+      { x, z: z + depth },
+      { x, z },
+    ],
+  };
+}
 
 describe('createTrack', () => {
   it('filters out roads with fewer than 2 points', () => {
@@ -124,6 +148,26 @@ describe('createTrack', () => {
       roads: [],
     });
     expect(track.spawn).toEqual({ position: { x: 0, z: 0 }, heading: 0 });
+  });
+
+  it('spawns on the road vertex closest to a police station', () => {
+    const track = createTrack({
+      ...SAMPLE_DATA,
+      items: [{ kind: 'policeStation', id: 9, x: 190, z: 45, name: 'Polizei' }],
+    });
+    expect(track.spawn.position).toEqual({ x: 100, z: 0 });
+  });
+
+  it('spawns within 100m of a police station on the real map', () => {
+    const track = createTrack(viennaData as never);
+    expect(track.features.policeStations.length).toBeGreaterThan(0);
+    const distances = track.features.policeStations.map((station) =>
+      Math.hypot(
+        track.spawn.position.x - station.position.x,
+        track.spawn.position.z - station.position.z,
+      ),
+    );
+    expect(Math.min(...distances)).toBeLessThan(100);
   });
 
   it('uses traffic light x/z as world coordinates directly', () => {
@@ -595,6 +639,61 @@ describe('createTrack', () => {
     });
   });
 
+  describe('nearestRoadPoint', () => {
+    const roads = createTrack(SAMPLE_DATA).roads;
+
+    it('finds the closest point on the closest road', () => {
+      const near = nearestRoadPoint(50, 40, roads)!;
+      expect(near.x).toBeCloseTo(50, 6);
+      expect(near.z).toBeCloseTo(40, 6);
+      expect(near.distance).toBeCloseTo(0, 6);
+    });
+
+    it('reports the tangent, width, and side of the road it picked', () => {
+      const near = nearestRoadPoint(-50, 0, roads)!;
+      expect(near.width).toBe(12);
+      expect(near.tx).toBeCloseTo(1, 6);
+      expect(near.tz).toBeCloseTo(0, 6);
+      expect(near.cross).toBeCloseTo(0, 6);
+      expect(near.distance).toBeCloseTo(50, 6);
+    });
+
+    it('clamps to the end of a road', () => {
+      const near = nearestRoadPoint(-500, 0, roads)!;
+      expect(near.x).toBeCloseTo(0, 6);
+      expect(near.z).toBeCloseTo(0, 6);
+    });
+
+    it('is null when the map has no roads', () => {
+      expect(nearestRoadPoint(0, 0, [])).toBeNull();
+    });
+  });
+
+  describe('snapYawTo', () => {
+    it('keeps a base yaw that already points at the target', () => {
+      expect(snapYawTo(0, 0.3)).toBe(0);
+    });
+
+    it('flips the base yaw when the target is behind it', () => {
+      expect(snapYawTo(0, Math.PI + 0.3)).toBeCloseTo(Math.PI, 6);
+    });
+
+    it('keeps the base yaw when the target is exactly side on', () => {
+      expect(snapYawTo(0, Math.PI / 2)).toBe(0);
+      expect(snapYawTo(0, -Math.PI / 2)).toBe(0);
+    });
+
+    it('never returns a yaw outside a half turn', () => {
+      for (const base of [-3, -1, 0, 1, 3]) {
+        for (const target of [-3, -0.5, 0, 0.5, 3]) {
+          const snapped = snapYawTo(base, target);
+          expect(snapped).toBeGreaterThan(-Math.PI);
+          expect(snapped).toBeLessThanOrEqual(Math.PI);
+        }
+      }
+    });
+  });
+
   describe('markingPattern', () => {
     function roadWith(overrides: Partial<PolylineRoad>): PolylineRoad {
       return {
@@ -640,6 +739,83 @@ describe('createTrack', () => {
 
     it('gives living streets no markings', () => {
       expect(markingPattern(roadWith({ type: 'living_street' }))).toBe('none');
+    });
+  });
+
+  describe('station placement', () => {
+    const WIDE = rectangle(50, 0, 0, 40, 20);
+    const TALL = rectangle(51, 0, 60, 20, 40);
+
+    const DATA_WITH_BUILDINGS: OSMMapData = {
+      ...SAMPLE_DATA,
+      buildings: [WIDE, TALL],
+      items: [
+        { kind: 'policeStation', id: 50, x: -900, z: -900, name: 'Wache' },
+        { kind: 'hospital', id: 51, x: -900, z: -900, name: 'Klinik' },
+        { kind: 'gasStation', id: 99, x: -50, z: 0, name: 'BP' },
+      ],
+    };
+
+    it('links a station to the OSM building that shares its id', () => {
+      const track = createTrack(DATA_WITH_BUILDINGS);
+      expect(track.features.policeStations[0].buildingId).toBe(50);
+      expect(track.features.hospitals[0].buildingId).toBe(51);
+    });
+
+    it('leaves a station with no matching building unlinked', () => {
+      const track = createTrack(DATA_WITH_BUILDINGS);
+      expect(track.features.gasStations[0].buildingId).toBeUndefined();
+    });
+
+    it('centres a building station on its roof frame, not the item point', () => {
+      const track = createTrack(DATA_WITH_BUILDINGS);
+      expect(track.features.policeStations[0].position).toEqual({ x: 20, z: 10 });
+      expect(track.features.hospitals[0].position).toEqual({ x: 10, z: 80 });
+    });
+
+    it('runs the station model along the long side of its building', () => {
+      const track = createTrack(DATA_WITH_BUILDINGS);
+      const wide = track.features.policeStations[0].yaw!;
+      const tall = track.features.hospitals[0].yaw!;
+      expect(Math.sin(wide)).toBeCloseTo(0, 6);
+      expect(Math.cos(tall)).toBeCloseTo(0, 6);
+    });
+
+    it('turns a building station to face the nearest road', () => {
+      const track = createTrack(DATA_WITH_BUILDINGS);
+      expect(track.features.policeStations[0].yaw).toBeCloseTo(Math.PI, 6);
+      expect(track.features.hospitals[0].yaw).toBeCloseTo(Math.PI / 2, 6);
+    });
+
+    it('faces a point-only station at the nearest road', () => {
+      const track = createTrack(DATA_WITH_BUILDINGS);
+      const station = track.features.gasStations[0];
+      expect(station.position).toEqual({ x: -50, z: 0 });
+      expect(station.yaw).toBeCloseTo(Math.PI / 2, 6);
+    });
+
+    it('leaves a station with no road anywhere facing world +Z', () => {
+      const track = createTrack({
+        ...SAMPLE_DATA,
+        roads: [],
+        buildings: [WIDE],
+        items: [{ kind: 'policeStation', id: 50, x: 0, z: 0, name: 'Wache' }],
+      });
+      expect(track.features.policeStations[0].yaw).toBeCloseTo(0, 6);
+    });
+
+    it('links the Liesing police station to its building on the real map', () => {
+      const track = createTrack(viennaData as never);
+      const liesing = track.features.policeStations.find(
+        (station) => station.name === 'Polizeikommissariat Liesing',
+      )!;
+      expect(liesing.buildingId).toBe(141423603);
+      expect(track.buildings.some((b) => b.id === liesing.buildingId)).toBe(true);
+
+      const pointOnly = track.features.policeStations.find(
+        (station) => station.name === 'Polizeiinspektion Anton-Baumgartner-Straße',
+      )!;
+      expect(pointOnly.buildingId).toBeUndefined();
     });
   });
 

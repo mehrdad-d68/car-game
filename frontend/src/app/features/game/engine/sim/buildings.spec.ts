@@ -104,6 +104,15 @@ describe('createBuildings', () => {
     expect(b.points[0]).toEqual({ x: 0, z: 0 });
   });
 
+  it('skips bridge outlines so they do not block the road beneath', () => {
+    const built = createBuildings([
+      { id: 1, type: 'bridge', name: '', points: square(10) },
+      { id: 2, type: 'Bridge', name: '', points: square(10) },
+      { id: 3, type: 'house', name: '', points: square(10) },
+    ]);
+    expect(built.map((b) => b.id)).toEqual([3]);
+  });
+
   it('computes area, centroid and height', () => {
     const [b] = createBuildings([
       { id: 1, type: 'house', name: '', levels: 2, points: square(10) },

@@ -1,5 +1,55 @@
 import * as THREE from 'three';
-import { clearModelCache, disposeModel, fetchModelBinary, fitModel } from './model-loader';
+import {
+  clearModelCache,
+  disposeModel,
+  fetchModelBinary,
+  fitModel,
+  flattenTransmission,
+  stripLights,
+} from './model-loader';
+
+describe('flattenTransmission', () => {
+  it('turns transmission glass into plain transparency', () => {
+    const glass = new THREE.MeshPhysicalMaterial({ transmission: 0.9, opacity: 0.16 });
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(new THREE.BoxGeometry(), glass));
+
+    flattenTransmission(group);
+
+    expect(glass.transmission).toBe(0);
+    expect(glass.transparent).toBe(true);
+    expect(glass.opacity).toBeCloseTo(0.16, 6);
+  });
+
+  it('leaves opaque materials alone', () => {
+    const wall = new THREE.MeshStandardMaterial();
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(new THREE.BoxGeometry(), wall));
+
+    flattenTransmission(group);
+
+    expect(wall.transparent).toBe(false);
+  });
+});
+
+describe('stripLights', () => {
+  it('removes every light in the model and keeps the meshes', () => {
+    const group = new THREE.Group();
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+    const nested = new THREE.Group();
+    nested.add(new THREE.PointLight(), mesh);
+    group.add(new THREE.DirectionalLight(), nested);
+
+    stripLights(group);
+
+    const lights: THREE.Object3D[] = [];
+    group.traverse((object) => {
+      if (object instanceof THREE.Light) lights.push(object);
+    });
+    expect(lights).toEqual([]);
+    expect(mesh.parent).toBe(nested);
+  });
+});
 
 describe('fitModel', () => {
   it('derives the scale from the model bounding box length', () => {

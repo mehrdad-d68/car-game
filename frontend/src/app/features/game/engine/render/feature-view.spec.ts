@@ -4,10 +4,13 @@ import { PropPart } from '../sim/prop-spec';
 import { createTrack } from '../sim/track';
 import viennaData from '../../../../../../../backend/src/modules/map/data/vienna-roads.json';
 import {
+  BusStopFootprint,
+  busStopFootprint,
   crossingStripeCount,
   crossingStripeRotation,
   FeatureView,
   geometryFor,
+  Placement,
   ROUNDED_BOX_RADIUS_RATIO,
   partKey,
   placeBusStop,
@@ -293,25 +296,41 @@ describe('planTrafficLightApproaches', () => {
 describe('placeBusStop', () => {
   const roads = createTrack(SAMPLE_DATA).roads;
 
-  it('moves a stop on the road centerline to the kerb side', () => {
-    const placement = placeBusStop(0, 0, roads);
+  const shelter: BusStopFootprint = { halfLength: 6, front: 2, back: 2 };
+
+  it('moves a stop on the road centerline to the kerb, clear of the road', () => {
+    const placement = placeBusStop(0, 0, roads, shelter);
     expect(placement.x).toBeCloseTo(0, 6);
-    expect(placement.z).toBeCloseTo(7.5, 6);
+    expect(placement.z).toBeCloseTo(6 + 1.5 + 2, 6);
     expect(placement.faceYaw).toBeCloseTo(Math.PI, 6);
   });
 
   it('offsets a stop on a north-south road to its right side', () => {
-    const placement = placeBusStop(50, 60, roads);
-    expect(placement.x).toBeCloseTo(44.5, 6);
+    const placement = placeBusStop(50, 60, roads, shelter);
+    expect(placement.x).toBeCloseTo(50 - (4 + 1.5 + 2), 6);
     expect(placement.z).toBeCloseTo(60, 6);
     expect(placement.faceYaw).toBeCloseTo(Math.PI / 2, 6);
   });
 
-  it('keeps a stop that is already beside the road in place', () => {
-    const placement = placeBusStop(-12, 4, roads);
+  it('pulls a stop mapped inside the carriageway out to the kerb on its own side', () => {
+    const placement = placeBusStop(-12, -2, roads, shelter);
     expect(placement.x).toBeCloseTo(-12, 6);
-    expect(placement.z).toBeCloseTo(4, 6);
-    expect(placement.faceYaw).toBeCloseTo(Math.PI, 6);
+    expect(placement.z).toBeCloseTo(-(6 + 1.5 + 2), 6);
+    expect(placement.faceYaw).toBeCloseTo(0, 6);
+  });
+
+  it('slides a shelter along the kerb when its end would reach into a cross street', () => {
+    // On Street B at z=10 the 12 m shelter would span z 4..16, 2 m into Street A
+    // (half-width 6). Sliding 2 m away from the junction clears it.
+    const placement = placeBusStop(49, 10, roads, shelter);
+    expect(placement.x).toBeCloseTo(50 - (4 + 1.5 + 2), 6);
+    expect(placement.z).toBeCloseTo(12, 6);
+  });
+
+  it('sizes the footprint from the model bounds', () => {
+    const model = new THREE.Mesh(new THREE.BoxGeometry(12, 3, 4));
+    model.position.z = 0.5;
+    expect(busStopFootprint(model)).toEqual({ halfLength: 6, front: 2.5, back: 1.5 });
   });
 
   it('leaves a far-away stop unchanged', () => {
@@ -348,7 +367,7 @@ describe('FeatureView', () => {
 
   it('builds one pool per distinct part type, not per marker', () => {
     const totalCapacity = view.pools.reduce((sum, pool) => sum + pool.capacity, 0);
-    expect(view.pools.length).toBe(29);
+    expect(view.pools.length).toBe(20);
     expect(view.pools.length).toBeLessThan(totalCapacity);
     for (const pool of view.pools) {
       expect(pool.mesh).toBeInstanceOf(THREE.InstancedMesh);
@@ -513,9 +532,9 @@ describe('FeatureView', () => {
     expect(hospital.scaleX).toBeCloseTo(60 / 10);
     expect(hospital.scaleZ).toBeCloseTo(30 / 8);
     const stop = sized.placements.find((p) => p.kind === 'busStop')!;
-    expect(stop.variant).toBe('interchange');
-    expect(stop.scaleX).toBeCloseTo(25 / 8);
-    expect(stop.scaleZ).toBeCloseTo(1);
+    expect(stop.variant).toBe('model');
+    expect(stop.scaleX).toBe(1);
+    expect(stop.scaleZ).toBe(1);
     sized.dispose();
   });
 
@@ -531,37 +550,31 @@ describe('FeatureView', () => {
     viewPlain.dispose();
   });
 
-  it('chooses the shelter variant when a bus stop has no footprint', () => {
+  it('treats every bus stop as a model-only placement', () => {
     const stops = view.placements.filter((p) => p.kind === 'busStop');
     expect(stops).toHaveLength(2);
     for (const stop of stops) {
-      expect(stop.variant).toBe('shelter');
+      expect(stop.variant).toBe('model');
       expect(stop.scaleX).toBe(1);
       expect(stop.scaleZ).toBe(1);
     }
   });
 
-  it('spans interchange posts and benches across the placed footprint', () => {
-    const plaza = createTrack({
-      ...SAMPLE_DATA,
-      items: [
-        { kind: 'busStop', id: 5, x: 0, z: 0, name: 'Plaza', type: 'platform', width: 26.7, depth: 5 },
-      ],
-    });
-    const viewPlaza = new FeatureView(plaza, PROP_SPECS);
-    const stop = viewPlaza.placements.find((p) => p.kind === 'busStop')!;
-    expect(stop.variant).toBe('interchange');
-    viewPlaza.update(0, 0);
-    const posts = viewPlaza.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'post')!;
-    const benches = viewPlaza.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'bench')!;
-    expect(posts.mesh.count).toBe(7);
-    expect(benches.mesh.count).toBe(5);
-    const canopy = viewPlaza.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'canopy')!;
-    expect(canopy.mesh.count).toBe(1);
-    expect((canopy.mesh.geometry as THREE.BoxGeometry).parameters.width).toBeCloseTo(8, 6);
-    const scaleX = canopy.mesh.instanceMatrix.array[0];
-    expect(Math.abs(scaleX)).toBeCloseTo(26.7 / 8, 3);
-    viewPlaza.dispose();
+  it('replaces every bus stop with a loaded model clone', () => {
+    const model = new THREE.Group();
+    model.name = 'bus-model';
+    const models = new Map<MapItemKind, THREE.Group>([['busStop', model]]);
+    const withModels = new FeatureView(track, PROP_SPECS, models);
+
+    expect(withModels.pools.filter((pool) => pool.kind === 'busStop')).toHaveLength(0);
+    const stops = placementsOf(withModels, 'busStop');
+    expect(stops).toHaveLength(2);
+    expect(withModels.modelGroups).toHaveLength(2);
+    withModels.update(0, 0);
+    expect(withModels.modelGroups.filter((group) => group.visible)).toHaveLength(1);
+    withModels.update(20001, 20001);
+    expect(withModels.modelGroups.filter((group) => group.visible)).toHaveLength(1);
+    withModels.dispose();
   });
 
   it('starts with every pool empty', () => {
@@ -579,26 +592,15 @@ describe('FeatureView', () => {
   });
 
   it('clears every pool when the car enters an empty region', () => {
-    const busPole = view.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'post')!;
+    const stripes = view.pools.find((pool) => pool.kind === 'pedestrianCrossing' && pool.name === 'stripe')!;
 
     view.update(0, 0);
-    expect(busPole.mesh.count).toBe(2);
+    expect(stripes.mesh.count).toBeGreaterThan(0);
 
     view.update(30000, 30000);
     for (const pool of view.pools) {
       expect(pool.mesh.count).toBe(0);
     }
-  });
-
-  it('reveals placement pools near the car and keeps far ones empty', () => {
-    const busPole = view.pools.find((pool) => pool.kind === 'busStop' && pool.name === 'post')!;
-
-    view.update(0, 0);
-    expect(busPole.mesh.count).toBe(2);
-
-    view.update(20000, 20000);
-    expect(busPole.mesh.count).toBe(2);
-    expect(view.pools.find((pool) => pool.kind === 'pedestrianCrossing')!.mesh.count).toBe(0);
   });
 
   it('hides markers that leave the culling window', () => {
@@ -630,6 +632,23 @@ describe('FeatureView', () => {
     withModels.dispose();
   });
 
+  it('culls prop models outside the model radius', () => {
+    const model = new THREE.Group();
+    const models = new Map<MapItemKind, THREE.Group>([['gasStation', model]]);
+    const view = new FeatureView(track, PROP_SPECS, models);
+    const [placed] = placementsOf(view, 'gasStation');
+
+    view.update(placed.x, placed.z);
+    expect(view.modelGroups[0].visible).toBe(true);
+
+    view.update(placed.x + 200, placed.z);
+    expect(view.modelGroups[0].visible).toBe(true);
+
+    view.update(placed.x + 300, placed.z);
+    expect(view.modelGroups[0].visible).toBe(false);
+    view.dispose();
+  });
+
   it('keeps building after dispose', () => {
     view.dispose();
     const rebuilt = new FeatureView(createTrack(SAMPLE_DATA), PROP_SPECS);
@@ -641,7 +660,7 @@ describe('FeatureView', () => {
 function placementsOf(
   view: FeatureView,
   kind: MapItemKind,
-): { kind: MapItemKind }[] {
+): Placement[] {
   return view.placements.filter((p) => p.kind === kind);
 }
 
@@ -681,6 +700,36 @@ describe('POI markers', () => {
     expect(canopy.mesh.count).toBe(1);
     view.update(20000, 20000);
     expect(canopy.mesh.count).toBe(0);
+  });
+
+  it('places a building station from its marker rather than the raw item point', () => {
+    const data: OSMMapData = {
+      ...SAMPLE_DATA,
+      buildings: [
+        {
+          id: 40,
+          type: 'public',
+          name: 'Wache',
+          points: [
+            { x: 0, z: 40 }, { x: 40, z: 40 }, { x: 40, z: 60 }, { x: 0, z: 60 }, { x: 0, z: 40 },
+          ],
+        },
+      ],
+      items: [{ kind: 'policeStation', id: 40, x: 0, z: 0, name: 'Wache' }],
+    };
+    const stationTrack = createTrack(data);
+    const station = stationTrack.features.policeStations[0];
+    const models = new Map<MapItemKind, THREE.Group>([
+      ['policeStation', new THREE.Group()],
+    ]);
+    const stationView = new FeatureView(stationTrack, PROP_SPECS, models);
+
+    const placement = placementsOf(stationView, 'policeStation')[0] as Placement;
+    expect(placement.x).toBeCloseTo(station.position.x, 6);
+    expect(placement.z).toBeCloseTo(station.position.z, 6);
+    expect(placement.yaw).toBeCloseTo(station.yaw!, 6);
+    expect(stationView.modelGroups[0].rotation.y).toBeCloseTo(station.yaw!, 6);
+    stationView.dispose();
   });
 
   it('produces no POI pools when the track has no POIs', () => {

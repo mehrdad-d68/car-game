@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { MapItemKind, OSMMapData } from '../sim/osm-types';
 import { PropSpec } from '../sim/prop-spec';
 import { createTrack } from '../sim/track';
-import { loadPresentModels, presentPropKinds } from './prop-models';
+import { loadPresentModels, presentPropKinds, replacedBuildingIds } from './prop-models';
 
 const DATA: OSMMapData = {
   meta: {
@@ -45,6 +45,54 @@ describe('presentPropKinds', () => {
 
   it('yields nothing for an empty track', () => {
     expect(presentPropKinds(createTrack({ ...DATA, items: [] })).size).toBe(0);
+  });
+});
+
+describe('replacedBuildingIds', () => {
+  const STATION_DATA: OSMMapData = {
+    ...DATA,
+    buildings: [
+      {
+        id: 7,
+        type: 'public',
+        name: 'Wache',
+        points: [
+          { x: 0, z: 40 },
+          { x: 40, z: 40 },
+          { x: 40, z: 60 },
+          { x: 0, z: 60 },
+          { x: 0, z: 40 },
+        ],
+      },
+    ],
+    items: [
+      { kind: 'policeStation', id: 7, x: 20, z: 50, name: 'Wache' },
+      { kind: 'hospital', id: 7, x: 20, z: 50, name: 'Klinik' },
+      { kind: 'gasStation', id: 8, x: 100, z: 100, name: 'BP' },
+    ],
+  };
+
+  const modelsFor = (...kinds: MapItemKind[]): Map<MapItemKind, THREE.Group> =>
+    new Map(kinds.map((kind) => [kind, new THREE.Group()]));
+
+  it('lists the buildings behind stations whose kind has a loaded model', () => {
+    const track = createTrack(STATION_DATA);
+    expect(replacedBuildingIds(track, modelsFor('policeStation'))).toEqual(new Set([7]));
+  });
+
+  it('covers every station kind, not just police', () => {
+    const track = createTrack(STATION_DATA);
+    expect(replacedBuildingIds(track, modelsFor('hospital'))).toEqual(new Set([7]));
+  });
+
+  it('keeps the OSM building when no model loaded for that kind', () => {
+    const track = createTrack(STATION_DATA);
+    expect(replacedBuildingIds(track, new Map())).toEqual(new Set());
+  });
+
+  it('ignores a model for a kind that draws no station', () => {
+    const track = createTrack(STATION_DATA);
+    expect(replacedBuildingIds(track, modelsFor('busStop'))).toEqual(new Set());
   });
 });
 

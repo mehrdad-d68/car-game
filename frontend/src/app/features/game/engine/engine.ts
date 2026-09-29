@@ -12,10 +12,10 @@ import { FeatureView } from './render/feature-view';
 import { clearModelCache, disposeModel, loadCarModel } from './render/model-loader';
 import { loadBuildingModels } from './render/building-models';
 import { firstHit, groundPoint } from './render/picker';
-import { loadPresentModels, presentPropKinds } from './render/prop-models';
+import { loadPresentModels, presentPropKinds, replacedBuildingIds } from './render/prop-models';
 import { compileMaterials } from './render/prepare-scene';
 import { RouteArrow } from './render/route-arrow';
-import { createScene, SceneLights, SceneSetup } from './render/scene';
+import { applyEnvironment, createScene, SceneLights, SceneSetup } from './render/scene';
 import { disposeLabelCache } from './render/text-label';
 import { TrackView } from './render/track-view';
 import { Viewport } from './render/viewport';
@@ -66,6 +66,7 @@ export class Engine {
   private carView: CarView;
   private readonly rig = new CameraRig(1);
   private readonly viewport: Viewport;
+  private readonly environment: THREE.Texture;
   private readonly loop: FixedStepLoop;
   private readonly clock = new THREE.Clock();
 
@@ -166,6 +167,7 @@ export class Engine {
       }),
       undefined,
       catalog,
+      replacedBuildingIds(track, propModels),
     );
     this.buildingView.setModels(buildingModelGroups);
     this.buildingView.update(track.spawn.position.x, track.spawn.position.z);
@@ -182,6 +184,7 @@ export class Engine {
     this.viewport = new Viewport(container, (aspect) =>
       this.rig.setAspect(aspect),
     );
+    this.environment = applyEnvironment(this.scene, this.viewport.renderer);
 
     this.loop = new FixedStepLoop((dt) => {
       this.simSeconds += dt;
@@ -633,6 +636,7 @@ export class Engine {
     if (this.sky instanceof THREE.Texture) {
       this.sky.dispose();
     }
+    this.environment.dispose();
     disposeLabelCache();
     clearModelCache();
   }

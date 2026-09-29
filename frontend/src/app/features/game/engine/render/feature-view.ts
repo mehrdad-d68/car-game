@@ -2,7 +2,15 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { MapItemKind } from '../sim/osm-types';
 import { PropPart, PropSpec, PropVariant } from '../sim/prop-spec';
-import { PolylineRoad, TrackData } from '../sim/track';
+import {
+  featureKeyFor,
+  nearestRoadPoint,
+  PoiMarker,
+  PolylineRoad,
+  StationKind,
+  STATION_KINDS,
+  TrackData,
+} from '../sim/track';
 import { createToonRamp } from './building-textures';
 import { ROAD_HEIGHT, SURFACE_OFFSET } from './constants';
 import { createPropTextures, PropTextures } from './prop-textures';
@@ -10,6 +18,9 @@ import { PartInstance, PropPool } from './prop-pool';
 
 const MARKER_CELL = 600;
 const MARKER_RADIUS = 600;
+// GLB props are far heavier than the pooled boxes; a 12 m shelter is a few
+// pixels past this distance anyway.
+const MODEL_RADIUS = 250;
 
 const LIGHT_SEARCH_RADIUS = 12;
 const LIGHT_SIDE_MARGIN = 1.5;
@@ -28,8 +39,25 @@ function signalColour(x: number, z: number): SignalColour {
   return SIGNAL_COLOURS[Math.abs(seed) % SIGNAL_COLOURS.length];
 }
 
-const BUS_STOP_CENTER_TOLERANCE = 1;
 const BUS_STOP_SIDE_MARGIN = 1.5;
+const BUS_STOP_SNAP_RADIUS = 30;
+const BUS_STOP_SAMPLE_STEP = 1.5;
+
+// Where to try the shelter relative to its kerb spot: pushed back from the road
+// and slid along the kerb (away from a junction), nearest candidates first.
+const BUS_STOP_MAX_PUSH = 6;
+const BUS_STOP_MAX_SLIDE = 8;
+const BUS_STOP_CANDIDATES: readonly { push: number; slide: number }[] = (() => {
+  const out: { push: number; slide: number }[] = [];
+  for (let push = 0; push <= BUS_STOP_MAX_PUSH; push += 0.5) {
+    for (let slide = -BUS_STOP_MAX_SLIDE; slide <= BUS_STOP_MAX_SLIDE; slide += 1) {
+      out.push({ push, slide });
+    }
+  }
+  return out.sort(
+    (a, b) => Math.hypot(a.push, a.slide) - Math.hypot(b.push, b.slide),
+  );
+})();
 
 const CROSSING_SEARCH_RADIUS = 6;
 const CROSSING_TANGENT_PROBE = 5;
@@ -61,70 +89,101 @@ export interface BusStopPlacement {
   faceYaw: number;
 }
 
+// Extent of a shelter from its origin, in its own frame: along the kerb
+// (±halfLength), toward the road (front) and away from it (back).
+export interface BusStopFootprint {
+  halfLength: number;
+  front: number;
+  back: number;
+}
+
+// The pooled shelter this replaced was 8 m × 6 m.
+const DEFAULT_BUS_STOP_FOOTPRINT: BusStopFootprint = { halfLength: 4, front: 3, back: 3 };
+
+export function busStopFootprint(model: THREE.Object3D): BusStopFootprint {
+  model.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(model);
+  if (bounds.isEmpty()) return DEFAULT_BUS_STOP_FOOTPRINT;
+  return {
+    halfLength: Math.max(-bounds.min.x, bounds.max.x),
+    front: Math.max(bounds.max.z, 0),
+    back: Math.max(-bounds.min.z, 0),
+  };
+}
+
+// How far the worst point of the footprint reaches into any road (> 0 overlaps).
+function footprintOverlap(
+  cx: number,
+  cz: number,
+  awayX: number,
+  awayZ: number,
+  footprint: BusStopFootprint,
+  roads: PolylineRoad[],
+): number {
+  const alongX = -awayZ;
+  const alongZ = awayX;
+  const depths = [-footprint.front, 0, footprint.back];
+  let worst = -Infinity;
+  for (let u = -footprint.halfLength; ; u += BUS_STOP_SAMPLE_STEP) {
+    const along = Math.min(u, footprint.halfLength);
+    for (const depth of depths) {
+      const penetration = roadPenetration(
+        cx + alongX * along + awayX * depth,
+        cz + alongZ * along + awayZ * depth,
+        roads,
+      );
+      if (penetration > worst) worst = penetration;
+    }
+    if (along >= footprint.halfLength) break;
+  }
+  return worst;
+}
+
 export function placeBusStop(
   x: number,
   z: number,
   roads: PolylineRoad[],
+  footprint: BusStopFootprint = DEFAULT_BUS_STOP_FOOTPRINT,
 ): BusStopPlacement {
-  let best: {
-    distance: number;
-    cross: number;
-    tx: number;
-    tz: number;
-    cx: number;
-    cz: number;
-    width: number;
-  } | null = null;
-
-  for (const road of roads) {
-    const points = road.points;
-    if (points.length < 2) continue;
-    for (let i = 0; i < points.length - 1; i++) {
-      const a = points[i];
-      const b = points[i + 1];
-      const sx = b.x - a.x;
-      const sz = b.z - a.z;
-      const lenSq = sx * sx + sz * sz;
-      if (lenSq < 1e-12) continue;
-      let t = ((x - a.x) * sx + (z - a.z) * sz) / lenSq;
-      t = Math.max(0, Math.min(1, t));
-      const cx = a.x + sx * t;
-      const cz = a.z + sz * t;
-      const distance = Math.hypot(x - cx, z - cz);
-      if (!best || distance < best.distance) {
-        const len = Math.sqrt(lenSq);
-        best = {
-          distance,
-          cross: (sx / len) * (z - a.z) - (sz / len) * (x - a.x),
-          tx: sx / len,
-          tz: sz / len,
-          cx,
-          cz,
-          width: road.width,
-        };
-      }
-    }
-  }
-
-  if (!best) {
+  const nearest = nearestRoadPoint(x, z, roads);
+  if (!nearest || nearest.distance > BUS_STOP_SNAP_RADIUS) {
     return { x, z, faceYaw: 0 };
   }
 
-  let px = x;
-  let pz = z;
-  if (Math.abs(best.cross) < BUS_STOP_CENTER_TOLERANCE) {
-    const sideX = -best.tz;
-    const sideZ = best.tx;
-    const offset = best.width / 2 + BUS_STOP_SIDE_MARGIN;
-    px = x + sideX * offset;
-    pz = z + sideZ * offset;
+  // Stand on the kerb of whichever side the stop was mapped on, facing the road.
+  const side = nearest.cross < 0 ? -1 : 1;
+  const awayX = -nearest.tz * side;
+  const awayZ = nearest.tx * side;
+  const faceYaw = Math.atan2(-awayX, -awayZ);
+
+  const alongX = -awayZ;
+  const alongZ = awayX;
+  const widest = roads.reduce((max, road) => Math.max(max, road.width), 0);
+  const reach =
+    BUS_STOP_SNAP_RADIUS +
+    Math.hypot(BUS_STOP_MAX_PUSH, BUS_STOP_MAX_SLIDE) +
+    footprint.halfLength +
+    footprint.front +
+    footprint.back +
+    widest / 2 +
+    BUS_STOP_SIDE_MARGIN;
+  const local = roads.filter(
+    (road) => road.points.length >= 2 && roadDistance(x, z, road) - road.width / 2 <= reach,
+  );
+
+  const kerb = nearest.width / 2 + BUS_STOP_SIDE_MARGIN + footprint.front;
+  const kerbX = nearest.x + awayX * kerb;
+  const kerbZ = nearest.z + awayZ * kerb;
+  let best = { x: kerbX, z: kerbZ, overlap: Infinity };
+  for (const { push, slide } of BUS_STOP_CANDIDATES) {
+    const px = kerbX + awayX * push + alongX * slide;
+    const pz = kerbZ + awayZ * push + alongZ * slide;
+    const overlap = footprintOverlap(px, pz, awayX, awayZ, footprint, local);
+    if (overlap < best.overlap) best = { x: px, z: pz, overlap };
+    if (overlap <= 0) break;
   }
 
-  return {
-    x: px,
-    z: pz,
-    faceYaw: Math.atan2(best.cx - px, best.cz - pz),
-  };
+  return { x: best.x, z: best.z, faceYaw };
 }
 
 function pointSegmentDistance(
@@ -569,23 +628,14 @@ export class FeatureView {
     for (const crossing of this.track.features.pedestrianCrossings) {
       this.handleCrossing(crossing.position.x, crossing.position.z, props, models, raw);
     }
+    const shelter = models.get('busStop');
+    const shelterFootprint = shelter ? busStopFootprint(shelter) : undefined;
     for (const stop of this.track.features.publicTransportStops) {
-      this.handleBusStop(stop.position.x, stop.position.z, stop.width, stop.depth, props, models, raw);
+      this.handleBusStop(stop.position.x, stop.position.z, models, shelterFootprint);
     }
-    for (const kind of ['gasStation', 'fireStation', 'hospital', 'policeStation'] as const) {
-      const key: 'gasStations' | 'fireStations' | 'hospitals' | 'policeStations' =
-        `${kind}s` as const;
-      for (const station of this.track.features[key]) {
-        this.handleStation(
-          kind,
-          station.position.x,
-          station.position.z,
-          station.width,
-          station.depth,
-          props,
-          models,
-          raw,
-        );
+    for (const kind of STATION_KINDS) {
+      for (const station of this.track.features[featureKeyFor(kind)]) {
+        this.handleStation(kind, station, props, models, raw);
       }
     }
 
@@ -828,46 +878,29 @@ export class FeatureView {
   private handleBusStop(
     x: number,
     z: number,
-    width: number | undefined,
-    depth: number | undefined,
-    props: PropSpec[],
     models: ReadonlyMap<MapItemKind, THREE.Group>,
-    raw: Map<string, RawAtom[]>,
+    footprint: BusStopFootprint | undefined,
   ): void {
-    const spec = specFor(props, 'busStop');
-    if (!spec) return;
-    const placement = placeBusStop(x, z, this.track.roads);
-    const base = spec.footprint ?? { width: 8, depth: 6 };
-    const interchange = width !== undefined && width >= 8;
-    const scaleX = interchange ? footprintScale(width, base.width) : 1;
-    const scaleZ = interchange ? Math.min(footprintScale(depth, base.depth), 3) : 1;
+    const placement = placeBusStop(x, z, this.track.roads, footprint);
     const placed: Placement = {
       kind: 'busStop',
-      variant: interchange ? 'interchange' : 'shelter',
+      variant: 'model',
       x: placement.x,
       y: 0,
       z: placement.z,
       yaw: placement.faceYaw,
-      scaleX,
-      scaleZ,
+      scaleX: 1,
+      scaleZ: 1,
     };
-    const index = this.addPlacement(placed);
+    this.addPlacement(placed);
     if (models.has('busStop')) {
       this.placeModel(models, 'busStop', placed);
-      return;
     }
-    const variant = variantFor(spec, placed.variant);
-    if (!variant) return;
-    const marker = composeMarkerMatrix(placement.x, 0, placement.z, placement.faceYaw);
-    this.emitVariant(raw, index, marker, variant, base, scaleX, scaleZ);
   }
 
   private handleStation(
-    kind: 'gasStation' | 'fireStation' | 'hospital' | 'policeStation',
-    x: number,
-    z: number,
-    width: number | undefined,
-    depth: number | undefined,
+    kind: StationKind,
+    marker: PoiMarker,
     props: PropSpec[],
     models: ReadonlyMap<MapItemKind, THREE.Group>,
     raw: Map<string, RawAtom[]>,
@@ -875,15 +908,16 @@ export class FeatureView {
     const spec = specFor(props, kind);
     if (!spec) return;
     const base = spec.footprint ?? { width: 10, depth: 8 };
-    const scaleX = footprintScale(width, base.width);
-    const scaleZ = footprintScale(depth, base.depth);
+    const scaleX = footprintScale(marker.width, base.width);
+    const scaleZ = footprintScale(marker.depth, base.depth);
+    const yaw = marker.yaw ?? 0;
     const placement: Placement = {
       kind,
       variant: 'default',
-      x,
+      x: marker.position.x,
       y: 0,
-      z,
-      yaw: 0,
+      z: marker.position.z,
+      yaw,
       scaleX,
       scaleZ,
     };
@@ -894,8 +928,8 @@ export class FeatureView {
     }
     const variant = variantFor(spec, 'default');
     if (!variant) return;
-    const marker = composeMarkerMatrix(x, 0, z, 0);
-    this.emitVariant(raw, index, marker, variant, base, scaleX, scaleZ);
+    const matrix = composeMarkerMatrix(marker.position.x, 0, marker.position.z, yaw);
+    this.emitVariant(raw, index, matrix, variant, base, scaleX, scaleZ);
   }
 
   update(carX: number, carZ: number): void {
@@ -926,10 +960,11 @@ export class FeatureView {
       }
     }
 
+    const modelRadiusSq = MODEL_RADIUS * MODEL_RADIUS;
     for (const record of this.modelRecords) {
       const dx = record.x - carX;
       const dz = record.z - carZ;
-      record.group.visible = dx * dx + dz * dz <= radiusSq;
+      record.group.visible = dx * dx + dz * dz <= modelRadiusSq;
     }
   }
 

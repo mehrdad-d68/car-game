@@ -77,6 +77,36 @@ export function disposeModel(group: THREE.Group): void {
   });
 }
 
+// Blender exports its scene lights (sun, area fills) into the GLB. The game
+// lights the world itself; a copied light per placed model would flood it.
+export function stripLights(group: THREE.Object3D): void {
+  const lights: THREE.Light[] = [];
+  group.traverse((object) => {
+    if (object instanceof THREE.Light) lights.push(object);
+  });
+  for (const light of lights) {
+    light.removeFromParent();
+    light.dispose();
+  }
+}
+
+// Transmission glass makes three.js re-render the whole opaque scene into an
+// extra target every frame it is on screen. Plain alpha blending looks close
+// enough on a bus shelter and costs nothing extra.
+export function flattenTransmission(group: THREE.Object3D): void {
+  group.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    for (const material of materials) {
+      if (material instanceof THREE.MeshPhysicalMaterial && material.transmission > 0) {
+        material.transmission = 0;
+        material.transparent = true;
+        material.depthWrite = false;
+      }
+    }
+  });
+}
+
 export async function loadModel(
   url: string,
   targetLength: number,
@@ -88,6 +118,8 @@ export async function loadModel(
       resolve(gltf.scene);
     }, reject);
   });
+  stripLights(group);
+  flattenTransmission(group);
 
   const bounds = new THREE.Box3().setFromObject(group);
   const size = bounds.getSize(new THREE.Vector3());
