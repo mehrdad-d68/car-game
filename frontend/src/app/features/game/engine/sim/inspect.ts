@@ -2,7 +2,7 @@ import { Building, BuildingGrid, tileKey, TILE_SIZE } from './buildings';
 import { makeGeoUnprojector } from './geo';
 import { RoadGraph } from './road-graph';
 import { MapItemKind } from './osm-types';
-import { PolylineRoad, projectOntoRoad, TrackData } from './track';
+import { featureKeyFor, PolylineRoad, projectOntoRoad, TrackData } from './track';
 import { CarState, Vec2 } from './types';
 
 const NODE_LOOKUP_RADIUS = 25;
@@ -198,7 +198,7 @@ function nearestNodeInfo(
 function collectNearby(track: TrackData, x: number, z: number): NearbyFeature[] {
   const features: { label: string; x: number; z: number }[] = [];
   for (const kind of Object.keys(FEATURE_LABELS) as MapItemKind[]) {
-    const key = featureKey(kind);
+    const key = featureKeyFor(kind);
     for (const item of track.features[key]) {
       features.push({ label: FEATURE_LABELS[kind], x: item.position.x, z: item.position.z });
     }
@@ -210,27 +210,6 @@ function collectNearby(track: TrackData, x: number, z: number): NearbyFeature[] 
   }
   nearby.sort((a, b) => a.distance - b.distance);
   return nearby.slice(0, NEARBY_MAX);
-}
-
-function featureKey(
-  kind: MapItemKind,
-): keyof TrackData['features'] {
-  switch (kind) {
-    case 'trafficLight':
-      return 'trafficLights';
-    case 'pedestrianCrossing':
-      return 'pedestrianCrossings';
-    case 'busStop':
-      return 'publicTransportStops';
-    case 'gasStation':
-      return 'gasStations';
-    case 'fireStation':
-      return 'fireStations';
-    case 'hospital':
-      return 'hospitals';
-    case 'policeStation':
-      return 'policeStations';
-  }
 }
 
 export function inspectPoint(

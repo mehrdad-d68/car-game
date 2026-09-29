@@ -27,6 +27,10 @@ export const FLOOR_HEIGHT = 3.2;
 const MIN_AREA = 1;
 const MAX_FLOORS = 60;
 
+// Outlines of structures raised above the ground (building=bridge spans a road).
+// Extruding them from the ground would wall off whatever passes underneath.
+const RAISED_TYPES = new Set(['bridge']);
+
 const STYLE_BY_TYPE: Record<string, BuildingStyle> = {
   house: 'home',
   detached: 'home',
@@ -144,6 +148,7 @@ export function createBuildings(raw: RawBuilding[]): Building[] {
   const built: Building[] = [];
   for (const item of raw) {
     if (!item.points || item.points.length < 4) continue;
+    if (RAISED_TYPES.has(item.type.toLowerCase())) continue;
     const ring = openRing(item.points);
     if (ring.length < 3) continue;
     const signed = signedArea(ring);

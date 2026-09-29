@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MapItemKind } from '../sim/osm-types';
 import { PropModel, PropSpec } from '../sim/prop-spec';
-import { TrackData } from '../sim/track';
+import { featureKeyFor, STATION_KINDS, TrackData } from '../sim/track';
 import { loadPropModel } from './model-loader';
 
 export function presentPropKinds(track: TrackData): Set<MapItemKind> {
@@ -10,11 +10,24 @@ export function presentPropKinds(track: TrackData): Set<MapItemKind> {
   if (features.trafficLights.length > 0) kinds.add('trafficLight');
   if (features.pedestrianCrossings.length > 0) kinds.add('pedestrianCrossing');
   if (features.publicTransportStops.length > 0) kinds.add('busStop');
-  if (features.gasStations.length > 0) kinds.add('gasStation');
-  if (features.fireStations.length > 0) kinds.add('fireStation');
-  if (features.hospitals.length > 0) kinds.add('hospital');
-  if (features.policeStations.length > 0) kinds.add('policeStation');
+  for (const kind of STATION_KINDS) {
+    if (features[featureKeyFor(kind)].length > 0) kinds.add(kind);
+  }
   return kinds;
+}
+
+export function replacedBuildingIds(
+  track: TrackData,
+  models: ReadonlyMap<MapItemKind, THREE.Group>,
+): Set<number> {
+  const replaced = new Set<number>();
+  for (const kind of STATION_KINDS) {
+    if (!models.has(kind)) continue;
+    for (const marker of track.features[featureKeyFor(kind)]) {
+      if (marker.buildingId !== undefined) replaced.add(marker.buildingId);
+    }
+  }
+  return replaced;
 }
 
 export type PropModelLoader = (model: PropModel) => Promise<THREE.Group>;

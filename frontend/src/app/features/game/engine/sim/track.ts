@@ -1,5 +1,6 @@
-import { MapItem, OSMMapData, OSMMeta, StationItem } from './osm-types';
+import { MapItem, MapItemKind, OSMMapData, OSMMeta, StationItem } from './osm-types';
 import { Building, createBuildings } from './buildings';
+import { roofFrame } from './footprint';
 import { nodeHash } from './node-key';
 import { Vec2 } from './types';
 
@@ -85,6 +86,68 @@ export interface TrackBounds {
   maxZ: number;
 }
 
+export interface NearestRoadPoint {
+  distance: number;
+  x: number;
+  z: number;
+  tx: number;
+  tz: number;
+  width: number;
+  cross: number;
+}
+
+export function nearestRoadPoint(
+  x: number,
+  z: number,
+  roads: PolylineRoad[],
+): NearestRoadPoint | null {
+  let best: NearestRoadPoint | null = null;
+  for (const road of roads) {
+    const points = road.points;
+    if (points.length < 2) continue;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const sx = b.x - a.x;
+      const sz = b.z - a.z;
+      const lenSq = sx * sx + sz * sz;
+      if (lenSq < 1e-12) continue;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * sx + (z - a.z) * sz) / lenSq));
+      const cx = a.x + sx * t;
+      const cz = a.z + sz * t;
+      const distance = Math.hypot(x - cx, z - cz);
+      if (best && distance >= best.distance) continue;
+      const len = Math.sqrt(lenSq);
+      best = {
+        distance,
+        x: cx,
+        z: cz,
+        tx: sx / len,
+        tz: sz / len,
+        width: road.width,
+        cross: (sx / len) * (z - a.z) - (sz / len) * (x - a.x),
+      };
+    }
+  }
+  return best;
+}
+
+function wrapYaw(yaw: number): number {
+  let wrapped = yaw;
+  while (wrapped > Math.PI) wrapped -= 2 * Math.PI;
+  while (wrapped <= -Math.PI) wrapped += 2 * Math.PI;
+  return wrapped;
+}
+
+function yawTowards(x: number, z: number, target: NearestRoadPoint): number {
+  return Math.atan2(target.x - x, target.z - z);
+}
+
+export function snapYawTo(base: number, target: number): number {
+  const delta = wrapYaw(target - base);
+  return Math.abs(delta) <= Math.PI / 2 ? base : wrapYaw(base + Math.PI);
+}
+
 export interface Spawn {
   position: Vec2;
   heading: number;
@@ -117,7 +180,38 @@ export interface PoiMarker {
   width?: number;
   depth?: number;
   area?: number;
+  buildingId?: number;
+  yaw?: number;
 }
+
+export const STATION_KINDS = [
+  'gasStation',
+  'fireStation',
+  'hospital',
+  'policeStation',
+] as const;
+
+export type StationKind = (typeof STATION_KINDS)[number];
+
+interface FeatureKeys {
+  trafficLight: 'trafficLights';
+  pedestrianCrossing: 'pedestrianCrossings';
+  busStop: 'publicTransportStops';
+  gasStation: 'gasStations';
+  fireStation: 'fireStations';
+  hospital: 'hospitals';
+  policeStation: 'policeStations';
+}
+
+const FEATURE_KEYS: FeatureKeys = {
+  trafficLight: 'trafficLights',
+  pedestrianCrossing: 'pedestrianCrossings',
+  busStop: 'publicTransportStops',
+  gasStation: 'gasStations',
+  fireStation: 'fireStations',
+  hospital: 'hospitals',
+  policeStation: 'policeStations',
+};
 
 export interface MapFeatures {
   trafficLights: TrafficLightMarker[];
@@ -127,6 +221,10 @@ export interface MapFeatures {
   fireStations: PoiMarker[];
   hospitals: PoiMarker[];
   policeStations: PoiMarker[];
+}
+
+export function featureKeyFor<K extends MapItemKind>(kind: K): FeatureKeys[K] {
+  return FEATURE_KEYS[kind];
 }
 
 export interface TrackData {
@@ -156,13 +254,34 @@ function quantizeWidth(raw: number): number {
 
 const ORIGIN_SPAWN: Spawn = { position: { x: 0, z: 0 }, heading: 0 };
 
-function selectSpawn(roads: { width: number; points: Vec2[] }[]): Spawn {
+function distanceSqToOrigin(p: Vec2): number {
+  return p.x * p.x + p.z * p.z;
+}
+
+function distanceSqToAny(p: Vec2, targets: readonly Vec2[]): number {
+  let best = Infinity;
+  for (const target of targets) {
+    const dx = p.x - target.x;
+    const dz = p.z - target.z;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq < best) {
+      best = distanceSq;
+    }
+  }
+  return best;
+}
+
+function selectSpawn(
+  roads: { width: number; points: Vec2[] }[],
+  targets: readonly Vec2[] = [],
+): Spawn {
   if (roads.length === 0) {
     return ORIGIN_SPAWN;
   }
 
   const major = roads.filter((r) => r.width >= MAJOR_ROAD_MIN_WIDTH);
   const candidates = major.length > 0 ? major : roads;
+  const score = targets.length > 0 ? distanceSqToAny : distanceSqToOrigin;
 
   let best: Spawn | null = null;
   let bestDistSq = Infinity;
@@ -170,7 +289,7 @@ function selectSpawn(roads: { width: number; points: Vec2[] }[]): Spawn {
   for (const road of candidates) {
     for (let i = 0; i < road.points.length - 1; i++) {
       const p = road.points[i];
-      const d = p.x * p.x + p.z * p.z;
+      const d = score(p, targets);
       if (d < bestDistSq) {
         bestDistSq = d;
         const dx = road.points[i + 1].x - p.x;
@@ -228,17 +347,46 @@ function itemsOfKind<K extends MapItem['kind']>(
   );
 }
 
+function stationPlacement(
+  item: StationItem,
+  roads: PolylineRoad[],
+  building: Building | undefined,
+): { position: Vec2; yaw: number; buildingId?: number } {
+  if (!building) {
+    const position = { x: item.x, z: item.z };
+    const road = nearestRoadPoint(position.x, position.z, roads);
+    return {
+      position,
+      yaw: road ? yawTowards(position.x, position.z, road) : 0,
+    };
+  }
+
+  const frame = roofFrame(building);
+  const position = { x: frame.cx, z: frame.cz };
+  const baseYaw = wrapYaw(
+    frame.across > frame.along ? frame.yaw : frame.yaw - Math.PI / 2,
+  );
+  const road = nearestRoadPoint(position.x, position.z, roads);
+  return {
+    position,
+    buildingId: building.id,
+    yaw: road ? snapYawTo(baseYaw, yawTowards(position.x, position.z, road)) : baseYaw,
+  };
+}
+
 function stationItems(
   items: MapItem[],
-  kind: StationItem['kind'],
+  kind: StationKind,
+  roads: PolylineRoad[],
+  buildingsById: ReadonlyMap<number, Building>,
 ): PoiMarker[] {
   return itemsOfKind(items, kind).map((i) => ({
     id: i.id,
     name: i.name,
-    position: { x: i.x, z: i.z },
     width: i.width,
     depth: i.depth,
     area: i.area,
+    ...stationPlacement(i, roads, buildingsById.get(i.id)),
   }));
 }
 
@@ -381,6 +529,8 @@ export function createTrack(osmData: OSMMapData): TrackData {
   const padding = 50;
 
   const items = osmData.items ?? [];
+  const buildings = createBuildings(osmData.buildings ?? []);
+  const buildingsById = new Map(buildings.map((b) => [b.id, b]));
   const features: MapFeatures = {
     trafficLights: itemsOfKind(items, 'trafficLight').map((i) => ({
       id: i.id,
@@ -401,10 +551,10 @@ export function createTrack(osmData: OSMMapData): TrackData {
         area: i.area,
       })),
     ),
-    gasStations: stationItems(items, 'gasStation'),
-    fireStations: stationItems(items, 'fireStation'),
-    hospitals: stationItems(items, 'hospital'),
-    policeStations: stationItems(items, 'policeStation'),
+    gasStations: stationItems(items, 'gasStation', roads, buildingsById),
+    fireStations: stationItems(items, 'fireStation', roads, buildingsById),
+    hospitals: stationItems(items, 'hospital', roads, buildingsById),
+    policeStations: stationItems(items, 'policeStation', roads, buildingsById),
   };
 
   return {
@@ -416,8 +566,11 @@ export function createTrack(osmData: OSMMapData): TrackData {
       maxX: maxX + padding,
       maxZ: maxZ + padding,
     },
-    spawn: selectSpawn(roads),
+    spawn: selectSpawn(
+      roads,
+      features.policeStations.map((station) => station.position),
+    ),
     features,
-    buildings: createBuildings(osmData.buildings ?? []),
+    buildings,
   };
 }

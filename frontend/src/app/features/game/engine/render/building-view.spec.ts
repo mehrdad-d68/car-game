@@ -11,6 +11,19 @@ import { PropPool } from './prop-pool';
 
 const textures = () => createBuildingTextures(() => null);
 
+function wallBuildingIds(view: BuildingView): Set<number> {
+  const ids = new Set<number>();
+  for (const child of view.group.children) {
+    const mesh = child as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.name.startsWith('buildings-')) continue;
+    const attribute = mesh.geometry.getAttribute('buildingId');
+    for (let i = 0; i < attribute.count; i++) {
+      ids.add(attribute.getX(i));
+    }
+  }
+  return ids;
+}
+
 describe('BuildingView', () => {
   const track = createTrack(viennaData as never);
 
@@ -228,6 +241,54 @@ describe('BuildingView', () => {
     expect(idAttribute.count).toBe(
       wall.geometry.getAttribute('position').count,
     );
+    view.dispose();
+  });
+
+  it('draws no geometry for a building a station model replaces', () => {
+    const buildings = createBuildings([
+      {
+        id: 900,
+        type: 'public',
+        name: 'Wache',
+        points: [
+          { x: 0, z: 0 }, { x: 40, z: 0 }, { x: 40, z: 20 }, { x: 0, z: 20 }, { x: 0, z: 0 },
+        ],
+      },
+      {
+        id: 901,
+        type: 'house',
+        name: '',
+        points: [
+          { x: 60, z: 0 }, { x: 80, z: 0 }, { x: 80, z: 20 }, { x: 60, z: 20 }, { x: 60, z: 0 },
+        ],
+      },
+    ]);
+
+    const all = new BuildingView(buildings, textures());
+    all.update(30, 10);
+    expect(wallBuildingIds(all)).toEqual(new Set([900, 901]));
+    all.dispose();
+
+    const replaced = new BuildingView(buildings, textures(), undefined, null, new Set([900]));
+    replaced.update(30, 10);
+    expect(wallBuildingIds(replaced)).toEqual(new Set([901]));
+
+    const pools = (replaced as unknown as { pools: Map<PartKind, PropPool> }).pools;
+    for (const kind of PART_KINDS) {
+      const mesh = pools.get(kind)!.mesh;
+      for (let i = 0; i < mesh.count; i++) {
+        expect(replaced.buildingIdAt(kind, i)).not.toBe(900);
+      }
+    }
+    replaced.dispose();
+  });
+
+  it('draws every building again when nothing is replaced', () => {
+    const view = new BuildingView(track.buildings, textures(), undefined, null, new Set());
+    view.update(310.8, -40.1);
+    const ids = wallBuildingIds(view);
+    expect(ids.size).toBeGreaterThan(0);
+    expect(ids.has(-1)).toBe(false);
     view.dispose();
   });
 

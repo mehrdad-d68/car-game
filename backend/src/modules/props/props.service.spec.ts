@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs';
 import { PropsService } from './props.service';
 import { MAP_ITEM_KINDS } from '../map/osm-types';
+import { PROP_MODELS } from './data/prop-models';
 
 describe('PropsService', () => {
   const service = new PropsService();
@@ -15,6 +17,7 @@ describe('PropsService', () => {
   it('gives every spec a name and at least one variant with parts', () => {
     for (const prop of service.findAll()) {
       expect(prop.name).toBeTruthy();
+      if (prop.kind === 'busStop') continue;
       expect(prop.variants.length).toBeGreaterThan(0);
       for (const variant of prop.variants) {
         expect(variant.id).toBeTruthy();
@@ -45,10 +48,6 @@ describe('PropsService', () => {
   });
 
   it('exposes a footprint for scaled kinds', () => {
-    expect(service.findOne('busStop')!.footprint).toEqual({
-      width: 8,
-      depth: 6,
-    });
     expect(service.findOne('gasStation')!.footprint).toEqual({
       width: 8,
       depth: 6,
@@ -67,8 +66,37 @@ describe('PropsService', () => {
     });
   });
 
-  it('has no model entries yet, so no kind resolves a model path', () => {
+  it('attaches a model to the police station and resolves its path', () => {
+    const police = service.findOne('policeStation')!;
+    expect(police.model).toEqual({
+      url: '/api/props/policeStation/model',
+      targetLength: 25.1,
+      yawOffset: 0,
+    });
+    expect(service.getModelPath('policeStation')).toContain(
+      'police-station.glb',
+    );
+  });
+
+  it('attaches a model to the bus stop and resolves its path', () => {
+    const bus = service.findOne('busStop')!;
+    expect(bus.model).toEqual({
+      url: '/api/props/busStop/model',
+      targetLength: 12,
+      yawOffset: 0,
+    });
+    expect(service.getModelPath('busStop')).toContain('bus-station.glb');
+  });
+
+  it('points every model at a file that exists on disk', () => {
+    for (const kind of Object.keys(PROP_MODELS)) {
+      expect(existsSync(service.getModelPath(kind)!)).toBe(true);
+    }
+  });
+
+  it('leaves every other kind without a model', () => {
     for (const kind of MAP_ITEM_KINDS) {
+      if (kind === 'policeStation' || kind === 'busStop') continue;
       expect(service.findOne(kind)!.model).toBeUndefined();
       expect(service.getModelPath(kind)).toBeUndefined();
     }

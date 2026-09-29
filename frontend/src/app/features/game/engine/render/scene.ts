@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
 const SKY_ZENITH = new THREE.Color(0x7ec8e3);
 const SKY_HORIZON = new THREE.Color(0xc9dde8);
@@ -7,6 +8,8 @@ const GROUND_BOUNCE = new THREE.Color(0x6b7c52);
 const SUN_COLOR = 0xfff4e0;
 const SUN_INTENSITY = 1.6;
 const HEMISPHERE_SKY_INTENSITY = 0.55;
+
+const ENVIRONMENT_INTENSITY = 0.8;
 
 const FOG_NEAR = 600;
 const FOG_FAR = 2500;
@@ -73,4 +76,20 @@ export function createScene(): SceneSetup {
   scene.add(sun);
 
   return { scene, lights: { sun }, sky };
+}
+
+// Image-based light for GLB models. Their PBR materials (metal, glass) reflect
+// the environment and render near-black without one; toon materials ignore it.
+export function applyEnvironment(
+  scene: THREE.Scene,
+  renderer: THREE.WebGLRenderer,
+): THREE.Texture {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const room = new RoomEnvironment();
+  const environment = pmrem.fromScene(room, 0.04).texture;
+  room.dispose();
+  pmrem.dispose();
+  scene.environment = environment;
+  scene.environmentIntensity = ENVIRONMENT_INTENSITY;
+  return environment;
 }
